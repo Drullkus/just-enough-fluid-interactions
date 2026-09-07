@@ -1,8 +1,6 @@
 package us.drullk.jefi.jei;
 
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -10,7 +8,6 @@ import org.slf4j.Logger;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.InteractionProber;
-import us.drullk.jefi.jei.probe.RegisteredInteractions;
 import us.drullk.jefi.jei.scene.SceneCache;
 import com.mojang.logging.LogUtils;
 
@@ -24,10 +21,8 @@ import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
-import net.neoforged.neoforge.fluids.FluidType;
 
 /**
  * Shows every {@link FluidInteractionRegistry} entry in JEI.
@@ -74,12 +69,7 @@ public final class FluidInteractionsJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipeCatalysts(IRecipeCatalystRegistration registration) {
-        Set<Item> buckets = new LinkedHashSet<>();
-        for (FluidType type : RegisteredInteractions.get().keySet()) {
-            FluidInteractionCategory.stillFluidsOf(type).forEach(fluid -> buckets.add(fluid.getBucket()));
-        }
-        buckets.remove(Items.AIR);
-        buckets.forEach(bucket -> registration.addRecipeCatalyst(bucket, TYPE));
+        registration.addRecipeCatalyst(Items.LAVA_BUCKET, TYPE);
     }
 
     @Override
