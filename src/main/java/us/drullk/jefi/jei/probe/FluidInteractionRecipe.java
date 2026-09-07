@@ -30,6 +30,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  * @param conditions additional positions that must hold a specific block or fluid (found by multi-position search)
  * @param results    blocks written by the interaction, keyed by offset; normally just the source position
  * @param failure    non-null when the interaction could not be processed; the other collections are then empty
+ * @param owner      mod id credited with registering the interaction, or null when none could be derived
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -39,13 +40,14 @@ public record FluidInteractionRecipe(
         List<Placement> neighbors,
         Map<BlockPos, Placement> conditions,
         Map<BlockPos, BlockState> results,
-        @Nullable Component failure) {
+        @Nullable Component failure,
+        @Nullable String owner) {
 
     /** The neighbor position used when probing, relative to the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
 
-    public static FluidInteractionRecipe failed(FluidType type, int index, ResourceLocation id, Component reason) {
-        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), Map.of(), Map.of(), reason);
+    public static FluidInteractionRecipe failed(FluidType type, int index, ResourceLocation id, Component reason, @Nullable String owner) {
+        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), Map.of(), Map.of(), reason, owner);
     }
 
     public boolean isFailure() {

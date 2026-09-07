@@ -84,6 +84,7 @@ public final class JeiAutoTest {
                     }
                     recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
                     LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
+                    checkAlternatives(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
                     timer = 30;
@@ -121,6 +122,23 @@ public final class JeiAutoTest {
             default -> {
             }
         }
+    }
+
+    /** Neighbor alternatives cycle in a JEI slot, so a repeated one is a defect rather than a display choice. */
+    private static void checkAlternatives(List<FluidInteractionRecipe> found) {
+        int offenders = 0;
+        for (FluidInteractionRecipe recipe : found) {
+            long distinct = recipe.neighbors().stream().distinct().count();
+            if (distinct != recipe.neighbors().size()) {
+                offenders++;
+                LOGGER.error("Smoke test found duplicate neighbor alternatives in {}: {} of {} are distinct",
+                        recipe.id(), distinct, recipe.neighbors().size());
+            }
+            LOGGER.info("Smoke test recipe {} (from {}): {} source state(s), {} neighbor alternative(s) {}",
+                    recipe.id(), recipe.owner(), recipe.sources().size(), recipe.neighbors().size(),
+                    recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+        }
+        LOGGER.info("Smoke test checked {} recipe(s) for duplicate neighbor alternatives, {} offender(s)", found.size(), offenders);
     }
 
     private static void enterWorld(Minecraft mc) {

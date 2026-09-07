@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
@@ -103,12 +104,15 @@ public final class InteractionProber {
 
     private List<FluidInteractionRecipe> probe(FluidType type, int index, InteractionInformation interaction) {
         ResourceLocation key = keyOf(type);
+        String owner = InteractionOwners.of(type, interaction);
         List<FluidState> sourceStates = sourceStates(type);
         if (sourceStates.isEmpty()) {
-            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type)));
+            LOGGER.info("Fluid interaction {}#{} (from {}) has no source fluid state to probe", key, index, InteractionOwners.describe(owner));
+            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type, owner), owner));
         }
 
         Map<GroupKey, Group> groups = new LinkedHashMap<>();
+        boolean wroteFromPredicate = false;
         for (FluidState source : sourceStates) {
             List<Hit> hits = new ArrayList<>();
             for (Placement candidate : fluidCandidates) {
@@ -121,6 +125,7 @@ public final class InteractionProber {
                 search(interaction, source).ifPresent(hits::add);
             }
             for (Hit hit : hits) {
+                wroteFromPredicate |= hit.wroteFromPredicate();
                 Map<BlockPos, Placement> conditions = new LinkedHashMap<>();
                 hit.requirements().forEach((pos, placement) -> {
                     if (!pos.equals(NEIGHBOR)) {
@@ -138,9 +143,13 @@ public final class InteractionProber {
             }
         }
 
+        if (wroteFromPredicate) {
+            LOGGER.debug("Fluid interaction {}#{} (from {}) wrote blocks from its predicate", key, index, InteractionOwners.describe(owner));
+        }
+
         if (groups.isEmpty()) {
-            LOGGER.debug("No probe of fluid interaction {}#{} succeeded", key, index);
-            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type)));
+            LOGGER.info("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
+            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type, owner), owner));
         }
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>(groups.size());
@@ -150,17 +159,22 @@ public final class InteractionProber {
             recipes.add(new FluidInteractionRecipe(
                     type, index, recipeId(key, index, variant++),
                     List.copyOf(group.sources), List.copyOf(group.neighbors),
-                    entry.getKey().conditions(), entry.getKey().results(), null));
+                    entry.getKey().conditions(), entry.getKey().results(), null, owner));
         }
         return recipes;
     }
 
-    /** Places the arrangement, runs the predicate, and if it passes runs the action and captures its writes. */
+    /**
+     * Places the arrangement, runs the predicate, and if it passes runs the action. Blocks written by the
+     * predicate count as results too: some interactions do all their work there and register an empty action.
+     */
     private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
         Run run = run(interaction, source, requirements);
         if (!run.passed()) {
             return Optional.empty();
         }
+        Map<BlockPos, BlockState> writes = new LinkedHashMap<>(run.writes());
+        boolean wroteFromPredicate = !writes.isEmpty();
         level.beginTracking();
         try {
             interaction.interaction().interact(level, ORIGIN, NEIGHBOR, source);
@@ -170,14 +184,17 @@ public final class InteractionProber {
         } finally {
             level.endTracking();
         }
-        Map<BlockPos, BlockState> writes = level.writes();
+        writes.putAll(level.writes());
         if (writes.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new Hit(new LinkedHashMap<>(requirements), writes));
+        return Optional.of(new Hit(new LinkedHashMap<>(requirements), writes, wroteFromPredicate));
     }
 
-    /** Places the arrangement and evaluates only the predicate, recording the positions it looked at. */
+    /**
+     * Places the arrangement and evaluates only the predicate, recording the positions it looked at and any
+     * blocks it wrote.
+     */
     private Run run(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
         level.reset();
         level.placeFluid(ORIGIN, source);
@@ -191,7 +208,7 @@ public final class InteractionProber {
         } finally {
             level.endTracking();
         }
-        return new Run(passed, level.reads());
+        return new Run(passed, level.reads(), level.writes());
     }
 
     /**
@@ -267,21 +284,25 @@ public final class InteractionProber {
                 typeKey.getNamespace() + "/" + typeKey.getPath() + "/" + index + "/" + variant);
     }
 
-    private static Component unable(FluidType type) {
-        return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable", type.getDescription());
+    private static Component unable(FluidType type, @Nullable String owner) {
+        if (owner == null) {
+            return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable", type.getDescription());
+        }
+        return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable_from", type.getDescription(), owner);
     }
 
-    private record Run(boolean passed, List<BlockPos> reads) {
+    private record Run(boolean passed, List<BlockPos> reads, Map<BlockPos, BlockState> writes) {
     }
 
-    private record Hit(Map<BlockPos, Placement> requirements, Map<BlockPos, BlockState> writes) {
+    private record Hit(Map<BlockPos, Placement> requirements, Map<BlockPos, BlockState> writes, boolean wroteFromPredicate) {
     }
 
     private record GroupKey(Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results) {
     }
 
+    /** One source state can hit many neighbors and one neighbor many source states, so both stay unique. */
     private static final class Group {
-        final List<FluidState> sources = new ArrayList<>();
-        final List<Placement> neighbors = new ArrayList<>();
+        final Set<FluidState> sources = new LinkedHashSet<>();
+        final Set<Placement> neighbors = new LinkedHashSet<>();
     }
 }

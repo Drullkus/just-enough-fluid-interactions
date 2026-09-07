@@ -14,5 +14,6 @@
   "jei.justenoughfluidinteractions.fluid_interactions.offset.south": "south of the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.east": "east of the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.west": "west of the source",
-  "jei.justenoughfluidinteractions.fluid_interactions.offset.at": "at offset (%s, %s, %s)"
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.at": "at offset (%s, %s, %s)",
+  "jei.justenoughfluidinteractions.fluid_interactions.unable_from": "Unable to process for %s (from %s)"
 }
