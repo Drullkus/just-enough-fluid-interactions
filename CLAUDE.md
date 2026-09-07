@@ -61,6 +61,9 @@ Never read, print, or probe that file or those values.
 - Everything in `scene/` runs on the render thread. Vertex buffers must be created and closed there.
 - JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`.
 - JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
+- A fresh `run/` directory (every new worktree) has no `options.txt`, so the client opens the accessibility
+  onboarding screen before the title screen. `JeiAutoTest` dismisses it itself; if a smoke test ever sits idle with no
+  `Smoke test` log line, that dismissal is what to check first.
 - Recipe ids (`justenoughfluidinteractions:<type namespace>/<type path>/<index>/<variant>`) must stay unique; JEI uses them for bookmarks.
 
 ## Verifying changes
