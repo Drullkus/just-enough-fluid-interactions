@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.probe;
+package us.drullk.jefi.jei.probe;
 
 import java.util.LinkedHashMap;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.sandbox;
+package us.drullk.jefi.jei.sandbox;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -9,7 +9,7 @@ import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
 
-import com.example.examplemod.jei.probe.Placement;
+import us.drullk.jefi.jei.probe.Placement;
 
 import dev.compactmods.gander.level.VirtualLevel;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;

@@ -1,4 +1,4 @@
-package com.example.examplemod.jei;
+package us.drullk.jefi.jei;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -7,11 +7,11 @@ import java.util.Set;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
-import com.example.examplemod.ExampleMod;
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
-import com.example.examplemod.jei.probe.InteractionProber;
-import com.example.examplemod.jei.probe.RegisteredInteractions;
-import com.example.examplemod.jei.scene.SceneCache;
+import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.InteractionProber;
+import us.drullk.jefi.jei.probe.RegisteredInteractions;
+import us.drullk.jefi.jei.scene.SceneCache;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.IModPlugin;
@@ -39,8 +39,8 @@ import net.neoforged.neoforge.fluids.FluidType;
 public final class FluidInteractionsJeiPlugin implements IModPlugin {
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public static final ResourceLocation UID = ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "fluid_interactions");
-    public static final RecipeType<FluidInteractionRecipe> TYPE = RecipeType.create(ExampleMod.MODID, "fluid_interaction", FluidInteractionRecipe.class);
+    public static final ResourceLocation UID = ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID, "fluid_interactions");
+    public static final RecipeType<FluidInteractionRecipe> TYPE = RecipeType.create(JustEnoughFluidInteractions.MODID, "fluid_interaction", FluidInteractionRecipe.class);
 
     private static volatile @Nullable IJeiRuntime runtime;
 

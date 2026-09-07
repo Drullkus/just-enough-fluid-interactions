@@ -1,11 +1,11 @@
-package com.example.examplemod.jei;
+package us.drullk.jefi.jei;
 
 import java.util.List;
 
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
-import com.example.examplemod.jei.probe.Placement;
-import com.example.examplemod.jei.scene.SceneCache;
-import com.example.examplemod.jei.scene.SceneWidget;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.Placement;
+import us.drullk.jefi.jei.scene.SceneCache;
+import us.drullk.jefi.jei.scene.SceneWidget;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.IRecipeSlotBuilder;

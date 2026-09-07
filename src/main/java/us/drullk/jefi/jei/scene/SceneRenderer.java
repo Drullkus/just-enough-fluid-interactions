@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.scene;
+package us.drullk.jefi.jei.scene;
 
 import java.util.List;
 import java.util.Map;

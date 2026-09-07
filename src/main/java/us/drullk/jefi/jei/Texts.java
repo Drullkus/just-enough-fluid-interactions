@@ -1,7 +1,7 @@
-package com.example.examplemod.jei;
+package us.drullk.jefi.jei;
 
-import com.example.examplemod.ExampleMod;
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -10,7 +10,7 @@ import net.minecraft.network.chat.MutableComponent;
 
 /** Translation helpers for the fluid interaction category. */
 public final class Texts {
-    public static final String PREFIX = "jei." + ExampleMod.MODID + ".fluid_interactions";
+    public static final String PREFIX = "jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions";
 
     private Texts() {
     }

@@ -1,12 +1,12 @@
-package com.example.examplemod.devtest;
+package us.drullk.jefi.devtest;
 
 import java.util.List;
 
 import org.slf4j.Logger;
 
-import com.example.examplemod.ExampleMod;
-import com.example.examplemod.jei.FluidInteractionsJeiPlugin;
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -28,14 +28,14 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * Development-only smoke test, enabled by {@code -Dexamplemod.jeiautotest=true} (see the {@code clientJeiTest}
+ * Development-only smoke test, enabled by {@code -Djustenoughfluidinteractions.jeiautotest=true} (see the {@code clientJeiTest}
  * run configuration). Loads or creates a flat creative world, opens this mod's JEI category, screenshots a few
  * pages of recipes into {@code run/screenshots}, and exits the game.
  */
-@EventBusSubscriber(modid = ExampleMod.MODID, value = Dist.CLIENT)
+@EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID, value = Dist.CLIENT)
 public final class JeiAutoTest {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final boolean ENABLED = Boolean.getBoolean("examplemod.jeiautotest");
+    private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
     private static final String WORLD_NAME = "jei_fluid_interactions_test";
     private static final int RECIPES_PER_SHOT = 2;
     private static final int MAX_SHOTS = 10;

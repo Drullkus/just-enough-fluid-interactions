@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.probe;
+package us.drullk.jefi.jei.probe;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -9,11 +9,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
-import com.example.examplemod.ExampleMod;
-import com.example.examplemod.jei.sandbox.SandboxLevel;
+import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.sandbox.SandboxLevel;
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.BlockPos;
@@ -264,12 +263,12 @@ public final class InteractionProber {
     }
 
     private static ResourceLocation recipeId(ResourceLocation typeKey, int index, int variant) {
-        return ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID,
+        return ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID,
                 typeKey.getNamespace() + "/" + typeKey.getPath() + "/" + index + "/" + variant);
     }
 
     private static Component unable(FluidType type) {
-        return Component.translatable("jei." + ExampleMod.MODID + ".fluid_interactions.unable", type.getDescription());
+        return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable", type.getDescription());
     }
 
     private record Run(boolean passed, List<BlockPos> reads) {

@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.scene;
+package us.drullk.jefi.jei.scene;
 
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -9,10 +9,10 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
-import com.example.examplemod.jei.probe.InteractionProber;
-import com.example.examplemod.jei.probe.Placement;
-import com.example.examplemod.jei.sandbox.SandboxLevel;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.InteractionProber;
+import us.drullk.jefi.jei.probe.Placement;
+import us.drullk.jefi.jei.sandbox.SandboxLevel;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.logging.LogUtils;
 

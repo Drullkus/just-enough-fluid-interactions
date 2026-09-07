@@ -113,7 +113,7 @@ neoForge {
         // saves screenshots under run/screenshots, then exits. See src/dev/java JeiAutoTest.
         clientJeiTest {
             client()
-            systemProperty 'examplemod.jeiautotest', 'true'
+            systemProperty 'justenoughfluidinteractions.jeiautotest', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 

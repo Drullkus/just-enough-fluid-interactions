@@ -1,7 +1,7 @@
-package com.example.examplemod.jei.scene;
+package us.drullk.jefi.jei.scene;
 
-import com.example.examplemod.jei.Texts;
-import com.example.examplemod.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.Texts;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.widgets.IRecipeWidget;

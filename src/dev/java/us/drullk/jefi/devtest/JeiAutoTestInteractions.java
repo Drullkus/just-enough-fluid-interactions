@@ -1,6 +1,6 @@
-package com.example.examplemod.devtest;
+package us.drullk.jefi.devtest;
 
-import com.example.examplemod.ExampleMod;
+import us.drullk.jefi.JustEnoughFluidInteractions;
 
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -15,9 +15,9 @@ import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInforma
  * checked against cases the bundled mods do not provide: an interaction that can never be exercised (the
  * "Unable to process" fallback) and one whose predicate inspects two positions (the multi-position search).
  */
-@EventBusSubscriber(modid = ExampleMod.MODID, bus = EventBusSubscriber.Bus.MOD)
+@EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class JeiAutoTestInteractions {
-    private static final boolean ENABLED = Boolean.getBoolean("examplemod.jeiautotest");
+    private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
 
     private JeiAutoTestInteractions() {
     }

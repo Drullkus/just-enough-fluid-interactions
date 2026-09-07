@@ -1,4 +1,4 @@
-package com.example.examplemod.jei.probe;
+package us.drullk.jefi.jei.probe;
 
 import org.jetbrains.annotations.Nullable;
 
