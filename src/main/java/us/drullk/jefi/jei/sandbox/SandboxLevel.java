@@ -198,6 +198,19 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     @Override
+    public float getShade(Direction direction, boolean shade) {
+        if (!shade) {
+            return 1.0F;
+        }
+        return switch (direction) {
+            case DOWN -> 0.5F;
+            case UP -> 1.0F;
+            case NORTH, SOUTH -> 0.8F;
+            case EAST, WEST -> 0.6F;
+        };
+    }
+
+    @Override
     public boolean isLoaded(BlockPos pos) {
         return true;
     }
