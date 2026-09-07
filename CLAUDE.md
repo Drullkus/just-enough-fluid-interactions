@@ -1,0 +1,67 @@
+# Just Enough Fluid Interactions
+
+A NeoForge 1.21.1 mod whose only feature is a JEI plugin that displays every `FluidInteractionRegistry` entry as a
+recipe, discovered by running the interactions in a sandbox level and rendered as 3D scenes with Gander.
+
+## Versions
+
+- Minecraft 1.21.1, NeoForge 21.1.249, ModDevGradle 2.0.146, Gradle wrapper 9.2.1, Java toolchain 21.
+- Parchment 2024.11.17 for 1.21.1.
+- JEI `curse.maven:jei-238222:8815666` (19.53.0.425), full jar on the compile classpath.
+- Gaia Dimension `curse.maven:gaia-dimension-302529:7021516` (1.21-2.2.288), a mod that registers 11 interactions.
+- Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, bundled jar-in-jar. Version in
+  `gradle.properties` (`gander_version`). Published versions are `0.2.x`; `1.0.0` is a local build only.
+- Mod id and package are `justenoughfluidinteractions`, `us.drullk.jefi`.
+
+## Documentation and comments
+
+- No comments narrating what changed, why, or which task/session produced it (no "per task 9", "fixed for the handoff", "added by agent", "TODO: see HANDOFF"). A comment states an invariant the code can't express on its own — nothing else. Delete narrative comments you encounter while touching a file, even ones you didn't write.
+- Don't renumber, duplicate, or invent new task numbers anywhere — not in code, comments, commit messages, or branch names.
+- Agents working in a worktree do not edit `CLAUDE.md` themselves. Report doc-relevant findings (a task is done, an assumption changed, a fact here is now wrong) in your final summary; the user reconciles the docs centrally. This avoids conflicting edits to the same file across parallel branches.
+- If your change makes a fact in `CLAUDE.md` or other Markdown file false (a renamed package, a moved file, a retired workaround), say so explicitly in your final report even if you're not the one editing the doc.
+
+## Agent workflow
+
+- Work happens on a task branch in its own worktree: one wrap-up commit, never `main`, never a push.
+- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)` and the absence of `Failed to bake` / `No probe of fluid interaction ... succeeded` failures.
+
+## Credentials
+
+GitHub Packages credentials are Gradle properties in the user's global `~/.gradle/gradle.properties`.
+Never read, print, or probe that file or those values.
+
+## Commands
+
+- Build the jar: `./gradlew build` (output `build/libs/justenoughfluidinteractions-1.0.0.jar`, includes `META-INF/jarjar/`).
+- Compile only: `./gradlew compileJava compileDevJava`.
+- Smoke test in a real client: `./gradlew runClientJeiTest`. Creates/loads a flat world, opens the category, writes
+  `run/screenshots/jei_fluid_interactions_*.png`, exits. Takes about 30 s. Read the PNGs to verify rendering.
+- Plain client: `./gradlew runClient`.
+- The machine's default JDK is 25; this project's wrapper is fine with it. Building Gander from source needs
+  `JAVA_HOME` pointed at a JDK 21 (its Gradle 8.11 rejects 25).
+
+## Source sets
+
+- `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages).
+- `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
+  `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config.
+- `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
+
+## Conventions and gotchas
+
+- No mixins. Access transformers are acceptable. ATs on NeoForge's own classes are applied at runtime by FML but are
+  **not visible at compile time** under ModDevGradle; use a reflective lookup (see `RegisteredInteractions`).
+- The sandbox level reports `isClientSide == false` on purpose so interactions guarded on the server side run. Anything
+  from Gander that assumes a client level must be overridden on `SandboxLevel` (model data already is).
+- `GuiGraphics.enableScissor` in 1.21.1 takes absolute GUI coordinates; the recipe widget's pose is translated to the
+  widget origin, so read `pose.m30()/m31()` for the absolute position.
+- Everything in `scene/` runs on the render thread. Vertex buffers must be created and closed there.
+- JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`.
+- JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
+- Recipe ids (`justenoughfluidinteractions:<type namespace>/<type path>/<index>/<variant>`) must stay unique; JEI uses them for bookmarks.
+
+## Verifying changes
+
+Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
+`Failed to bake`, and `No probe of fluid interaction ... succeeded`. Crop and enlarge screenshots with `sips` when a
+detail matters.
