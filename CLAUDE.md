@@ -10,7 +10,8 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 - JEI `curse.maven:jei-238222:8815666` (19.53.0.425), full jar on the compile classpath.
 - Gaia Dimension `curse.maven:gaia-dimension-302529:7021516` (1.21-2.2.288), a mod that registers 11 interactions.
 - Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, bundled jar-in-jar. Version in
-  `gradle.properties` (`gander_version`). Published versions are `0.2.x`; `1.0.0` is a local build only.
+  `gradle.properties` (`gander_version`), currently the published `0.2.32`; the jar-in-jar range is `[0.2,1.0)`.
+  Nothing resolves from the local Maven repository.
 - Mod id and package are `justenoughfluidinteractions`, `us.drullk.jefi`.
 
 ## Documentation and comments
@@ -37,8 +38,8 @@ Never read, print, or probe that file or those values.
 - Smoke test in a real client: `./gradlew runClientJeiTest`. Creates/loads a flat world, opens the category, writes
   `run/screenshots/jei_fluid_interactions_*.png`, exits. Takes about 30 s. Read the PNGs to verify rendering.
 - Plain client: `./gradlew runClient`.
-- The machine's default JDK is 25; this project's wrapper is fine with it. Building Gander from source needs
-  `JAVA_HOME` pointed at a JDK 21 (its Gradle 8.11 rejects 25).
+- The machine's default JDK is 25; this project's wrapper is fine with it. Normal builds never build Gander; if you
+  ever build it from source, its Gradle 8.11 needs `JAVA_HOME` pointed at a JDK 21.
 
 ## Source sets
 
@@ -46,6 +47,8 @@ Never read, print, or probe that file or those values.
 - `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
   `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
+- `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
+- There is no config class; the main class `us.drullk.jefi.JustEnoughFluidInteractions` only declares the mod id.
 
 ## Conventions and gotchas
 
