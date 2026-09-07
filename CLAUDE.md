@@ -24,7 +24,7 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 ## Agent workflow
 
 - Work happens on a task branch in its own worktree: one wrap-up commit, never `main`, never a push.
-- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)` and the absence of `Failed to bake` / `No probe of fluid interaction ... succeeded` failures.
+- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is info-level and expected exactly once).
 
 ## Credentials
 
@@ -35,7 +35,7 @@ Never read, print, or probe that file or those values.
 
 - Build the jar: `./gradlew build` (output `build/libs/justenoughfluidinteractions-1.0.0.jar`, includes `META-INF/jarjar/`).
 - Compile only: `./gradlew compileJava compileDevJava`.
-- Smoke test in a real client: `./gradlew runClientJeiTest`. Creates/loads a flat world, opens the category, writes
+- Smoke test in a real client: `./gradlew runClientJeiTest`. Deletes any previous test save, creates a flat world, opens the category, writes
   `run/screenshots/jei_fluid_interactions_*.png`, exits. Takes about 30 s. Read the PNGs to verify rendering.
 - Plain client: `./gradlew runClient`.
 - The machine's default JDK is 25; this project's wrapper is fine with it. Normal builds never build Gander; if you
@@ -59,15 +59,24 @@ Never read, print, or probe that file or those values.
 - `GuiGraphics.enableScissor` in 1.21.1 takes absolute GUI coordinates; the recipe widget's pose is translated to the
   widget origin, so read `pose.m30()/m31()` for the absolute position.
 - Everything in `scene/` runs on the render thread. Vertex buffers must be created and closed there.
+- Scenes are orthographic and drag-rotatable; the display flow height is `SceneArrangement.DISPLAY_FLOW_LEVEL`
+  (probing keeps level 7), the default camera angle is `SceneRenderer.DEFAULT_YAW`/`DEFAULT_PITCH`, and a custom
+  rotate cursor would plug into `SceneCursor.handle()`.
+- Interaction owners come from `InteractionOwners`: the lambda's declaring class, then the namespace of captured
+  registry objects. A third-party mod using `InteractionInformation`'s convenience constructors with only vanilla
+  blocks still reads as `neoforge`; treat attribution as approximate.
 - JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`.
 - JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
 - A fresh `run/` directory (every new worktree) has no `options.txt`, so the client opens the accessibility
   onboarding screen before the title screen. `JeiAutoTest` dismisses it itself; if a smoke test ever sits idle with no
-  `Smoke test` log line, that dismissal is what to check first.
+  `Smoke test` log line, that dismissal is what to check first. The test deletes its save before creating it, so
+  re-runs never load an existing world (loading one would stop on the experimental-world backup prompt).
 - Recipe ids (`justenoughfluidinteractions:<type namespace>/<type path>/<index>/<variant>`) must stay unique; JEI uses them for bookmarks.
 
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
-`Failed to bake`, and `No probe of fluid interaction ... succeeded`. Crop and enlarge screenshots with `sips` when a
-detail matters.
+`Failed to bake`, and `No probe of fluid interaction ... succeeded` (expected once, for the dev fallback; any other
+is a regression). The smoke test also logs one `Smoke test recipe ...` line per recipe with owner, source-state and
+neighbor counts, and `... 0 offender(s)` for the duplicate-alternative check. Crop and enlarge screenshots with `sips`
+when a detail matters.

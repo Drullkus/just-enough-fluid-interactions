@@ -1,6 +1,12 @@
 package us.drullk.jefi.devtest;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 
@@ -30,8 +36,8 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
  * Development-only smoke test, enabled by {@code -Djustenoughfluidinteractions.jeiautotest=true} (see the {@code clientJeiTest}
- * run configuration). Loads or creates a flat creative world, opens this mod's JEI category, screenshots a few
- * pages of recipes into {@code run/screenshots}, and exits the game.
+ * run configuration). Deletes any existing save and creates a fresh flat creative world, opens this mod's JEI
+ * category, screenshots a few pages of recipes into {@code run/screenshots}, and exits the game.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID, value = Dist.CLIENT)
 public final class JeiAutoTest {
@@ -142,11 +148,7 @@ public final class JeiAutoTest {
     }
 
     private static void enterWorld(Minecraft mc) {
-        if (mc.getLevelSource().levelExists(WORLD_NAME)) {
-            LOGGER.info("Smoke test loading existing world {}", WORLD_NAME);
-            mc.createWorldOpenFlows().openWorld(WORLD_NAME, () -> mc.setScreen(new TitleScreen()));
-            return;
-        }
+        deleteExistingWorld(mc);
         LOGGER.info("Smoke test creating world {}", WORLD_NAME);
         GameRules rules = new GameRules();
         rules.getRule(GameRules.RULE_DAYLIGHT).set(false, null);
@@ -157,6 +159,21 @@ public final class JeiAutoTest {
         mc.createWorldOpenFlows().createFreshLevel(WORLD_NAME, settings, options,
                 access -> access.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
                 new TitleScreen());
+    }
+
+    /** Runs from the title screen before any level is loaded, so the save directory is never open here. */
+    private static void deleteExistingWorld(Minecraft mc) {
+        Path path = mc.getLevelSource().getLevelPath(WORLD_NAME);
+        if (!Files.isDirectory(path)) {
+            return;
+        }
+        try (Stream<Path> entries = Files.walk(path)) {
+            for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(entry);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Smoke test failed to delete existing world " + WORLD_NAME, e);
+        }
     }
 
     private static void grab(Minecraft mc, String name) {
