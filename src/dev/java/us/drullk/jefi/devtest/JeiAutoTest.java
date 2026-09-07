@@ -13,6 +13,7 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.Difficulty;
@@ -56,7 +57,10 @@ public final class JeiAutoTest {
         Minecraft mc = Minecraft.getInstance();
         switch (phase) {
             case 0 -> {
-                if (mc.screen instanceof TitleScreen) {
+                if (mc.screen instanceof AccessibilityOnboardingScreen) {
+                    mc.options.onboardAccessibility = false;
+                    mc.setScreen(new TitleScreen());
+                } else if (mc.screen instanceof TitleScreen) {
                     mc.options.pauseOnLostFocus = false;
                     phase = 1;
                     enterWorld(mc);
