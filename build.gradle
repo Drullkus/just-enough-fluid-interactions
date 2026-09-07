@@ -26,8 +26,43 @@ sourceSets.main.resources {
     exclude("src/generated/**/.cache") // datagen cache files
 }
 
+// Development-only sources (smoke tests); bound to the mod for runs but never packaged.
+sourceSets {
+    dev {
+        java.srcDir 'src/dev/java'
+        resources.srcDir 'src/dev/resources'
+    }
+}
+
 repositories {
-    // Add here additional repositories if required by some of the dependencies below.
+    exclusiveContent {
+        forRepository {
+            maven {
+                url "https://cursemaven.com"
+            }
+        }
+        filter {
+            includeGroup "curse.maven"
+        }
+    }
+    // Gander (https://github.com/CompactMods/Gander) is published to GitHub Packages, which needs a token
+    // even for public artifacts. Maven local is consulted first so a locally published build can stand in.
+    exclusiveContent {
+        forRepositories(
+            mavenLocal(),
+            maven {
+                name = "GitHubPackages-Gander"
+                url = "https://maven.pkg.github.com/compactmods/gander"
+                credentials {
+                    username = project.findProperty("GHPackagesUsername") ?: System.getenv("GHPackagesUsername")
+                    password = project.findProperty("GHPackagesToken") ?: System.getenv("GHPackagesToken")
+                }
+            }
+        )
+        filter {
+            includeGroup "dev.compactmods.gander"
+        }
+    }
 }
 
 base {
@@ -46,8 +81,10 @@ neoForge {
         minecraftVersion = project.parchment_minecraft_version
     }
 
-    // This line is optional. Access Transformers are automatically detected
-    // accessTransformers = project.files('src/main/resources/META-INF/accesstransformer.cfg')
+    // Opens FluidInteractionRegistry's private interaction map for the JEI plugin.
+    accessTransformers {
+        from('src/main/resources/META-INF/accesstransformer.cfg')
+    }
 
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
@@ -70,6 +107,14 @@ neoForge {
         gameTestServer {
             type = "gameTestServer"
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        // Automated smoke test: creates/loads a flat world, opens the fluid interaction category in JEI,
+        // saves screenshots under run/screenshots, then exits. See src/dev/java JeiAutoTest.
+        clientJeiTest {
+            client()
+            systemProperty 'examplemod.jeiautotest', 'true'
+            programArguments.addAll '--width', '1280', '--height', '720'
         }
 
         data {
@@ -103,8 +148,13 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
+            // Development-only helpers (never packaged into the jar).
+            sourceSet(sourceSets.dev)
         }
     }
+
+    // Gives the dev source set the same Minecraft/NeoForge classpath as main.
+    addModdingDependenciesTo(sourceSets.dev)
 }
 
 // Sets up a dependency configuration called 'localRuntime'.
@@ -113,9 +163,13 @@ neoForge {
 // "optional", meaning it will not be pulled by dependents of this mod.
 configurations {
     runtimeClasspath.extendsFrom localRuntime
+    devImplementation.extendsFrom implementation
+    devRuntimeOnly.extendsFrom runtimeClasspath
 }
 
 dependencies {
+    devImplementation sourceSets.main.output
+
     // Example optional mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
     // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
@@ -137,6 +191,22 @@ dependencies {
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+
+    implementation "curse.maven:jei-238222:8815666"
+    implementation "curse.maven:gaia-dimension-302529:7021516"
+
+    // Gander (world-to-screen rendering library), bundled jar-in-jar. Its modules are FML game libraries,
+    // so they ship inside this mod's jar rather than as a separate mod dependency.
+    ["core", "levels", "rendering", "ui"].each { module ->
+        jarJar(implementation("dev.compactmods.gander:${module}")) {
+            version {
+                strictly "[1.0,2.0)"
+                prefer project.gander_version
+            }
+        }
+    }
+    // Gander's rendering module carries its own access transformer, which the dev runtime must apply too.
+    accessTransformers "dev.compactmods.gander:rendering:${gander_version}"
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
