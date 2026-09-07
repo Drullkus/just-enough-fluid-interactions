@@ -2,13 +2,18 @@ package us.drullk.jefi.jei;
 
 import java.util.List;
 
+import org.jetbrains.annotations.Nullable;
+
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.scene.SceneCache;
+import us.drullk.jefi.jei.scene.SceneRotation;
 import us.drullk.jefi.jei.scene.SceneWidget;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.IRecipeSlotBuilder;
+import mezz.jei.api.gui.ingredient.IRecipeSlotDrawablesView;
+import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.placement.HorizontalAlignment;
 import mezz.jei.api.gui.placement.VerticalAlignment;
 import mezz.jei.api.gui.widgets.IRecipeExtrasBuilder;
@@ -28,22 +33,25 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * JEI category for probed fluid interactions.
  *
- * <p>Top row: source fluid, plus sign, the neighbor (and any extra required blocks), arrow, result. Below it two
- * 3D scenes show the arrangement before and after the interaction. A recipe whose interaction could not be
- * processed shows only the source fluid and an explanation.
+ * <p>Two 3D scenes show the arrangement before and after the interaction, with one arrow between them. Above the
+ * left scene sits the input row (source fluid, the neighbor, and any extra required blocks, separated by plus
+ * signs); above the right scene sit the results. A recipe whose interaction could not be processed shows only
+ * the source fluid and an explanation.
  */
 public final class FluidInteractionCategory extends AbstractRecipeCategory<FluidInteractionRecipe> {
     public static final int WIDTH = 170;
     public static final int HEIGHT = 100;
 
     private static final int ROW_Y = 6;
-    private static final int SOURCE_X = 8;
-    private static final int NEIGHBOR_X = 40;
-    private static final int SLOT_STEP = 20;
-    private static final int ARROW_WIDTH = 24;
-    private static final int SCENE_Y = 28;
-    private static final int SCENE_SIZE = 56;
-    private static final int BEFORE_X = 12;
+    /** Footprint of a slot including its background, which JEI draws one pixel outside the ingredient. */
+    private static final int SLOT_SIZE = 18;
+    private static final int PLUS_GAP = 10;
+    private static final int RESULT_GAP = 2;
+    private static final int MIN_MARGIN = 4;
+
+    private static final int SCENE_Y = 26;
+    private static final int SCENE_SIZE = 68;
+    private static final int BEFORE_X = 5;
     private static final int AFTER_X = WIDTH - BEFORE_X - SCENE_SIZE;
 
     private final SceneCache scenes;
@@ -55,30 +63,32 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
 
     @Override
     public void setRecipe(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, IFocusGroup focuses) {
-        IRecipeSlotBuilder source = slot(builder.addInputSlot(SOURCE_X, ROW_Y)).setSlotName("source");
         if (recipe.isFailure()) {
+            IRecipeSlotBuilder source = slot(builder.addInputSlot(centered(SLOT_SIZE), ROW_Y)).setSlotName("source");
             stillFluidsOf(recipe.sourceType()).forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
             return;
         }
+
+        int[] inputs = inputSlotX(recipe);
+        int next = 0;
+
+        IRecipeSlotBuilder source = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("source");
         recipe.sourceFluids().forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
         source.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY)));
 
-        int x = NEIGHBOR_X;
         if (!recipe.neighbors().isEmpty()) {
-            IRecipeSlotBuilder neighbor = slot(builder.addInputSlot(x, ROW_Y)).setSlotName("neighbor");
+            IRecipeSlotBuilder neighbor = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("neighbor");
             addPlacements(neighbor, recipe.neighbors());
             neighbor.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(FluidInteractionRecipe.NEIGHBOR_OFFSET).withStyle(ChatFormatting.GRAY)));
-            x += SLOT_STEP;
         }
         for (var condition : recipe.conditions().entrySet()) {
             BlockPos offset = condition.getKey();
-            IRecipeSlotBuilder slot = slot(builder.addInputSlot(x, ROW_Y));
+            IRecipeSlotBuilder slot = slot(builder.addInputSlot(inputs[next++], ROW_Y));
             addPlacements(slot, List.of(condition.getValue()));
             slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
-            x += SLOT_STEP;
         }
 
-        int resultX = resultX(recipe);
+        int resultX = resultSlotX(recipe);
         for (var result : recipe.results().entrySet()) {
             BlockPos offset = result.getKey();
             IRecipeSlotBuilder slot = slot(builder.addOutputSlot(resultX, ROW_Y));
@@ -86,31 +96,35 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
             if (!offset.equals(BlockPos.ZERO)) {
                 slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
             }
-            resultX += SLOT_STEP;
+            resultX += SLOT_SIZE + RESULT_GAP;
         }
     }
 
     @Override
     public void createRecipeExtras(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, IFocusGroup focuses) {
         if (recipe.isFailure()) {
-            builder.addText(recipe.failure(), WIDTH - 16, HEIGHT - SCENE_Y - 8)
-                    .setPosition(8, SCENE_Y)
+            builder.addText(recipe.failure(), WIDTH - 2 * MIN_MARGIN, HEIGHT - SCENE_Y - MIN_MARGIN)
+                    .setPosition(MIN_MARGIN, SCENE_Y)
                     .setTextAlignment(HorizontalAlignment.CENTER)
                     .setTextAlignment(VerticalAlignment.CENTER);
             return;
         }
 
-        builder.addRecipePlusSignWidget().setPosition(SOURCE_X + 16, ROW_Y, NEIGHBOR_X - SOURCE_X - 16, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
-        int arrowX = resultX(recipe) - ARROW_WIDTH - 4;
-        builder.addRecipeArrowWidget().setPosition(arrowX, ROW_Y, ARROW_WIDTH, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
+        int[] inputs = inputSlotX(recipe);
+        for (int i = 1; i < inputs.length; i++) {
+            int gapX = inputs[i - 1] - 1 + SLOT_SIZE;
+            builder.addRecipePlusSignWidget().setPosition(gapX, ROW_Y, PLUS_GAP, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
+        }
 
-        builder.addWidget(new SceneWidget(scenes, recipe, false, BEFORE_X, SCENE_Y, SCENE_SIZE, SCENE_SIZE));
-        builder.addRecipeArrowWidget().setPosition(BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
-        builder.addWidget(new SceneWidget(scenes, recipe, true, AFTER_X, SCENE_Y, SCENE_SIZE, SCENE_SIZE));
+        SceneRotation rotation = new SceneRotation();
+        IRecipeSlotDrawablesView slots = builder.getRecipeSlots();
+        IRecipeSlotView source = slots.findSlotByName("source").orElse(null);
+        IRecipeSlotView neighbor = slots.findSlotByName("neighbor").orElse(null);
 
-        int labelY = SCENE_Y + SCENE_SIZE + 3;
-        builder.addText(Texts.key("before"), SCENE_SIZE, 10).setPosition(BEFORE_X, labelY).setTextAlignment(HorizontalAlignment.CENTER);
-        builder.addText(Texts.key("after"), SCENE_SIZE, 10).setPosition(AFTER_X, labelY).setTextAlignment(HorizontalAlignment.CENTER);
+        builder.addWidget(scene(builder, recipe, false, rotation, source, neighbor, BEFORE_X));
+        builder.addRecipeArrowWidget()
+                .setPosition(BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
+        builder.addWidget(scene(builder, recipe, true, rotation, source, neighbor, AFTER_X));
     }
 
     @Override
@@ -118,10 +132,41 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return recipe.id();
     }
 
-    /** X of the first result slot: after the neighbor and condition slots, leaving room for the arrow. */
-    private static int resultX(FluidInteractionRecipe recipe) {
-        int inputSlots = (recipe.neighbors().isEmpty() ? 0 : 1) + recipe.conditions().size();
-        return NEIGHBOR_X + inputSlots * SLOT_STEP + ARROW_WIDTH + 8;
+    private SceneWidget scene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, SceneRotation rotation,
+                              @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
+        SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, source, neighbor, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
+        builder.addInputHandler(widget);
+        return widget;
+    }
+
+    private static int inputCount(FluidInteractionRecipe recipe) {
+        return 1 + (recipe.neighbors().isEmpty() ? 0 : 1) + recipe.conditions().size();
+    }
+
+    /** Ingredient x of each input slot: the row is centered over the left scene, or flush left when too wide. */
+    private static int[] inputSlotX(FluidInteractionRecipe recipe) {
+        int count = inputCount(recipe);
+        int width = count * SLOT_SIZE + (count - 1) * PLUS_GAP;
+        int left = Math.max(MIN_MARGIN, BEFORE_X + SCENE_SIZE / 2 - width / 2);
+        int[] xs = new int[count];
+        for (int i = 0; i < count; i++) {
+            xs[i] = left + i * (SLOT_SIZE + PLUS_GAP) + 1;
+        }
+        return xs;
+    }
+
+    /** Ingredient x of the first result slot: centered over the right scene, pushed right to clear the input row. */
+    private static int resultSlotX(FluidInteractionRecipe recipe) {
+        int count = Math.max(1, recipe.results().size());
+        int width = count * SLOT_SIZE + (count - 1) * RESULT_GAP;
+        int[] inputs = inputSlotX(recipe);
+        int rowRight = inputs[inputs.length - 1] - 1 + SLOT_SIZE;
+        int left = Math.max(rowRight + MIN_MARGIN, AFTER_X + SCENE_SIZE / 2 - width / 2);
+        return Math.min(left, WIDTH - MIN_MARGIN - width) + 1;
+    }
+
+    private static int centered(int width) {
+        return (WIDTH - width) / 2 + 1;
     }
 
     private static IRecipeSlotBuilder slot(IRecipeSlotBuilder slot) {

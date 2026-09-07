@@ -6,6 +6,7 @@
   "jei.justenoughfluidinteractions.fluid_interactions.form.both": "Source or flowing",
   "jei.justenoughfluidinteractions.fluid_interactions.before": "Before",
   "jei.justenoughfluidinteractions.fluid_interactions.after": "After",
+  "jei.justenoughfluidinteractions.fluid_interactions.drag_to_rotate": "Drag to rotate",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.source": "at the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.neighbor": "next to the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.down": "below the source",

@@ -23,6 +23,11 @@ public final class Texts {
         return Component.translatable(PREFIX + "." + suffix, args);
     }
 
+    /** Hint on the scene widgets; carries its own wording so it reads correctly before the key is translated. */
+    public static MutableComponent drag() {
+        return Component.translatableWithFallback(PREFIX + ".drag_to_rotate", "Drag to rotate");
+    }
+
     /** Describes a position relative to the source fluid, such as "below the source". */
     public static MutableComponent offset(BlockPos offset) {
         if (offset.equals(BlockPos.ZERO)) {

@@ -44,8 +44,11 @@ import net.neoforged.neoforge.client.model.data.ModelData;
  * to stone, for instance) interleave in one byte stream and only the first block's worth of vertices survives.
  * Second, it re-bakes the whole region once per level section, which doubles translucent geometry. Here every
  * position is visited once, block and fluid geometry get their own buffers, and the CPU-side buffers are freed as
- * soon as the meshes are uploaded. The camera is fixed, so translucency is sorted once at upload time and the
- * baked section carries no builders for re-sorting.
+ * soon as the meshes are uploaded. Translucency is sorted at upload time and the quad centroids are kept, so
+ * {@link #resort} can rebuild the index buffers when the camera moves.
+ *
+ * <p>The baked sections carry no {@code SectionBufferBuilderPack}, so Gander's own
+ * {@code BakedLevelSection.resortTranslucency} cannot be used on them.
  */
 public final class SceneBakery {
     private static final int INITIAL_BUFFER_BYTES = 64 * 1024;
@@ -77,13 +80,44 @@ public final class SceneBakery {
             }
 
             VertexSorting sorting = VertexSorting.byDistance(cameraPosition.x, cameraPosition.y, cameraPosition.z);
-            Map<RenderType, VertexBuffer> blockBuffers = blocks.upload(sorting);
-            Map<RenderType, VertexBuffer> fluidBuffers = fluids.upload(sorting);
+            Map<RenderType, MeshData.SortState> blockSortStates = new Reference2ObjectArrayMap<>();
+            Map<RenderType, MeshData.SortState> fluidSortStates = new Reference2ObjectArrayMap<>();
+            Map<RenderType, VertexBuffer> blockBuffers = blocks.upload(sorting, blockSortStates);
+            Map<RenderType, VertexBuffer> fluidBuffers = fluids.upload(sorting, fluidSortStates);
 
-            BakedLevelSection section = new BakedLevelSection(null, null, blockBuffers, fluidBuffers, Map.of(), Map.of(), bounds);
+            BakedLevelSection section = new BakedLevelSection(null, null, blockBuffers, fluidBuffers, blockSortStates, fluidSortStates, bounds);
             SectionPos sectionPos = SectionPos.of(BlockPos.containing(bounds.minX, bounds.minY, bounds.minZ));
             return new BakedLevel(level, bounds, Map.of(sectionPos, section));
         }
+    }
+
+    /** Rebuilds the translucent index buffers for a new camera position. Must run on the render thread. */
+    public static void resort(BakedLevel baked, Vector3f cameraPosition) {
+        VertexSorting sorting = VertexSorting.byDistance(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+        try (ByteBufferBuilder scratch = new ByteBufferBuilder(INITIAL_BUFFER_BYTES)) {
+            for (BakedLevelSection section : baked.sections().values()) {
+                resort(section.blockBuffers(), section.blockSortStates(), sorting, scratch);
+                resort(section.fluidBuffers(), section.fluidSortStates(), sorting, scratch);
+            }
+        }
+    }
+
+    private static void resort(Map<RenderType, VertexBuffer> buffers, Map<RenderType, MeshData.SortState> sortStates,
+                               VertexSorting sorting, ByteBufferBuilder scratch) {
+        sortStates.forEach((type, sortState) -> {
+            VertexBuffer buffer = buffers.get(type);
+            if (buffer == null) {
+                return;
+            }
+            ByteBufferBuilder.Result indices = sortState.buildSortedIndexBuffer(scratch, sorting);
+            if (indices == null) {
+                return;
+            }
+            buffer.bind();
+            // uploadIndexBuffer takes ownership of the result and closes it, freeing the scratch range again.
+            buffer.uploadIndexBuffer(indices);
+            VertexBuffer.unbind();
+        });
     }
 
     private static void bakePosition(Level level, BlockPos pos, BlockRenderDispatcher dispatcher, ModelBlockRenderer modelRenderer,
@@ -125,7 +159,7 @@ public final class SceneBakery {
             });
         }
 
-        Map<RenderType, VertexBuffer> upload(VertexSorting sorting) {
+        Map<RenderType, VertexBuffer> upload(VertexSorting sorting, Map<RenderType, MeshData.SortState> sortStates) {
             Map<RenderType, VertexBuffer> uploaded = new Reference2ObjectArrayMap<>();
             builders.forEach((type, builder) -> {
                 MeshData mesh = builder.build();
@@ -135,7 +169,10 @@ public final class SceneBakery {
                 // The sorted index buffer lives in the scratch builder's memory until the upload copies it.
                 try (ByteBufferBuilder scratch = new ByteBufferBuilder(INITIAL_BUFFER_BYTES)) {
                     if (type.sortOnUpload()) {
-                        mesh.sortQuads(scratch, sorting);
+                        MeshData.SortState sortState = mesh.sortQuads(scratch, sorting);
+                        if (sortState != null) {
+                            sortStates.put(type, sortState);
+                        }
                     }
                     VertexBuffer buffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
                     buffer.bind();

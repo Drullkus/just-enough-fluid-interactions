@@ -12,6 +12,7 @@ import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexBuffer;
+import com.mojang.math.Axis;
 
 import dev.compactmods.gander.render.geometry.BakedLevelSection;
 import dev.compactmods.gander.render.toolkit.BlockRenderer;
@@ -19,10 +20,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.util.Mth;
 import net.minecraft.util.profiling.ProfilerFiller;
 
 /**
- * Draws a baked scene into a rectangle of the current GUI.
+ * Draws a baked scene into a rectangle of the current GUI through an orthographic camera orbiting the source
+ * position.
  *
  * <p>This deliberately uses Gander's bakery output and section renderer directly instead of its screen pipeline:
  * that pipeline allocates a window-sized render target plus an eight-layer translucency chain per widget, which
@@ -30,7 +33,16 @@ import net.minecraft.util.profiling.ProfilerFiller;
  * the main framebuffer through a viewport, with depth cleared only inside the widget's scissor rectangle.
  */
 public final class SceneRenderer {
-    private static final float FOV = (float) Math.toRadians(38);
+    /** Azimuth that puts the camera on the neighbor's side of the source, off-axis enough to see the whole row. */
+    public static final float DEFAULT_YAW = 225.0f;
+    public static final float DEFAULT_PITCH = 30.0f;
+
+    private static final float VIEW_DISTANCE = 50.0f;
+    private static final float NEAR = 1.0f;
+    private static final float FAR = 100.0f;
+    /** Translucency is sorted from far away so the ordering matches a parallel projection. */
+    private static final float SORT_DISTANCE = 1000.0f;
+
     private static final List<RenderType> OPAQUE_LAYERS = List.of(RenderType.solid(), RenderType.cutoutMipped(), RenderType.cutout());
 
     private SceneRenderer() {
@@ -41,7 +53,7 @@ public final class SceneRenderer {
      * @param width    widget width in GUI units
      * @param height   widget height in GUI units
      */
-    public static void draw(GuiGraphics graphics, SceneCache.BakedScene scene, int width, int height) {
+    public static void draw(GuiGraphics graphics, SceneCache.BakedScene scene, int width, int height, float yaw, float pitch) {
         Minecraft mc = Minecraft.getInstance();
         Window window = mc.getWindow();
         Matrix4f pose = graphics.pose().last().pose();
@@ -63,10 +75,16 @@ public final class SceneRenderer {
         RenderSystem.viewport(viewportX, viewportY, viewportWidth, viewportHeight);
         FogRenderer.setupNoFog();
 
-        Matrix4f projection = new Matrix4f().setPerspective(FOV, (float) width / (float) height, 0.05f, 100f);
+        float halfHeight = scene.radius();
+        float halfWidth = halfHeight * width / height;
+        Matrix4f projection = new Matrix4f().setOrtho(-halfWidth, halfWidth, -halfHeight, halfHeight, NEAR, FAR);
         PoseStack view = new PoseStack();
-        view.mulPose(scene.camera().rotation());
-        Vector3f cameraPosition = scene.camera().getLookFrom();
+        view.translate(0.0f, 0.0f, -VIEW_DISTANCE);
+        view.mulPose(Axis.XP.rotationDegrees(pitch));
+        view.mulPose(Axis.YP.rotationDegrees(yaw));
+
+        // The chunk shader adds (renderOrigin - cameraPosition) to every vertex, which here centers the scene.
+        Vector3f cameraPosition = new Vector3f();
         Vector3f renderOrigin = new Vector3f(scene.center()).negate();
 
         ProfilerFiller profiler = mc.getProfiler();
@@ -83,6 +101,19 @@ public final class SceneRenderer {
 
         RenderSystem.viewport(0, 0, window.getWidth(), window.getHeight());
         graphics.disableScissor();
+    }
+
+    /** Where to sort translucent quads from, in level coordinates, for the given orbit angles. */
+    public static Vector3f sortCamera(Vector3f center, float yaw, float pitch) {
+        float yawRadians = yaw * Mth.DEG_TO_RAD;
+        float pitchRadians = pitch * Mth.DEG_TO_RAD;
+        float horizontal = Mth.cos(pitchRadians);
+        return new Vector3f(
+                -horizontal * Mth.sin(yawRadians),
+                Mth.sin(pitchRadians),
+                horizontal * Mth.cos(yawRadians))
+                .mul(SORT_DISTANCE)
+                .add(center);
     }
 
     private static void drawLayer(ProfilerFiller profiler, Map<RenderType, VertexBuffer> buffers, RenderType layer, PoseStack view,
