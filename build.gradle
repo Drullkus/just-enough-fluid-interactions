@@ -46,10 +46,9 @@ repositories {
         }
     }
     // Gander (https://github.com/CompactMods/Gander) is published to GitHub Packages, which needs a token
-    // even for public artifacts. Maven local is consulted first so a locally published build can stand in.
+    // even for public artifacts.
     exclusiveContent {
-        forRepositories(
-            mavenLocal(),
+        forRepository {
             maven {
                 name = "GitHubPackages-Gander"
                 url = "https://maven.pkg.github.com/compactmods/gander"
@@ -58,7 +57,7 @@ repositories {
                     password = project.findProperty("GHPackagesToken") ?: System.getenv("GHPackagesToken")
                 }
             }
-        )
+        }
         filter {
             includeGroup "dev.compactmods.gander"
         }
@@ -200,7 +199,7 @@ dependencies {
     ["core", "levels", "rendering", "ui"].each { module ->
         jarJar(implementation("dev.compactmods.gander:${module}")) {
             version {
-                strictly "[1.0,2.0)"
+                strictly "[0.2,1.0)"
                 prefer project.gander_version
             }
         }
