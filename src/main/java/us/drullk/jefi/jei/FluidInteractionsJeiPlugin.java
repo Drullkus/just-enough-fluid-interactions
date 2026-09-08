@@ -1,10 +1,13 @@
 package us.drullk.jefi.jei;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.Config;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.InteractionProber;
@@ -64,7 +67,32 @@ public final class FluidInteractionsJeiPlugin implements IModPlugin {
             return;
         }
         List<FluidInteractionRecipe> recipes = new InteractionProber(level.registryAccess()).probeAll();
-        registration.addRecipes(TYPE, recipes);
+        registration.addRecipes(TYPE, filter(recipes));
+    }
+
+    private static List<FluidInteractionRecipe> filter(List<FluidInteractionRecipe> recipes) {
+        List<FluidInteractionRecipe> filtered = new ArrayList<>(recipes);
+
+        if (Config.HIDE_UNPROCESSABLE.get()) {
+            int before = filtered.size();
+            filtered.removeIf(FluidInteractionRecipe::isFailure);
+            int hidden = before - filtered.size();
+            if (hidden > 0) {
+                LOGGER.info("Hid {} unprocessable fluid interaction recipe(s)", hidden);
+            }
+        }
+
+        Set<String> ignoredMods = Set.copyOf(Config.IGNORED_MODS.get());
+        if (!ignoredMods.isEmpty()) {
+            int before = filtered.size();
+            filtered.removeIf(recipe -> recipe.owner() != null && ignoredMods.contains(recipe.owner()));
+            int ignored = before - filtered.size();
+            if (ignored > 0) {
+                LOGGER.info("Ignored {} fluid interaction recipe(s) from mods {}", ignored, ignoredMods);
+            }
+        }
+
+        return filtered;
     }
 
     @Override
