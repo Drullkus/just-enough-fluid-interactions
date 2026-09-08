@@ -47,7 +47,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static final int ROW_Y = 6;
     /** Footprint of a slot including its background, which JEI draws one pixel outside the ingredient. */
     private static final int SLOT_SIZE = 18;
-    private static final int PLUS_GAP = 10;
+    private static final int PLUS_GAP = 15;
     private static final int RESULT_GAP = 2;
     private static final int MIN_MARGIN = 4;
 
