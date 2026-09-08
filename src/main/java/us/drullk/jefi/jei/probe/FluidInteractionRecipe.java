@@ -1,6 +1,5 @@
 package us.drullk.jefi.jei.probe;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -76,23 +75,4 @@ public record FluidInteractionRecipe(
         return results.get(BlockPos.ZERO);
     }
 
-    /**
-     * Everything to place for a rendered scene, relative to the source position.
-     *
-     * @param after when true, the interaction's results are applied on top of the starting arrangement
-     */
-    public Map<BlockPos, Placement> scene(boolean after) {
-        Map<BlockPos, Placement> scene = new LinkedHashMap<>();
-        if (!sources.isEmpty()) {
-            scene.put(BlockPos.ZERO, Placement.ofFluid(sources.getFirst()));
-        }
-        if (!neighbors.isEmpty()) {
-            scene.put(NEIGHBOR_OFFSET, neighbors.getFirst());
-        }
-        scene.putAll(conditions);
-        if (after) {
-            results.forEach((pos, state) -> scene.put(pos, Placement.ofBlock(state)));
-        }
-        return scene;
-    }
 }
