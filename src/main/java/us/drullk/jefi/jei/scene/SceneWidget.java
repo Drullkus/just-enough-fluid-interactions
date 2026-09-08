@@ -1,9 +1,12 @@
 package us.drullk.jefi.jei.scene;
 
+import java.util.Map;
+
 import org.jetbrains.annotations.Nullable;
 
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.Placement;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import mezz.jei.api.gui.builder.ITooltipBuilder;
@@ -17,6 +20,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -107,18 +111,27 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
         return key.getType() == InputConstants.Type.MOUSE && key.getValue() == InputConstants.MOUSE_BUTTON_LEFT;
     }
 
+    /**
+     * A placement line is white when it differs from the same offset in the recipe's other phase, gray when that
+     * phase places the same thing there, so a long list shows what the interaction actually changed at a glance.
+     */
     @Override
     public void getTooltip(ITooltipBuilder tooltip, double mouseX, double mouseY) {
         if (!contains(mouseX, mouseY)) {
             return;
         }
+        SceneVariant variant = variant();
         tooltip.add(Texts.key(after ? "after" : "before").withStyle(ChatFormatting.GRAY));
-        SceneArrangement.of(recipe, variant()).forEach((offset, placement) -> tooltip.add(
-                Component.literal("  ")
-                        .append(placement.describe())
-                        .append(" ")
-                        .append(Texts.offset(offset))
-                        .withStyle(ChatFormatting.WHITE)));
+        Map<BlockPos, Placement> otherPhase = SceneArrangement.of(recipe, new SceneVariant(variant.source(), variant.neighbor(), !variant.after()));
+        SceneArrangement.of(recipe, variant).forEach((offset, placement) -> {
+            boolean unchanged = placement.equals(otherPhase.get(offset));
+            tooltip.add(
+                    Component.literal("  ")
+                            .append(placement.describe())
+                            .append(" ")
+                            .append(Texts.offset(offset))
+                            .withStyle(unchanged ? ChatFormatting.GRAY : ChatFormatting.WHITE));
+        });
         tooltip.add(Texts.drag().withStyle(ChatFormatting.DARK_GRAY));
     }
 
