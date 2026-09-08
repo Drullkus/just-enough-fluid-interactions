@@ -48,7 +48,9 @@ Never read, print, or probe that file or those values.
   `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
 - `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
-- There is no config class; the main class `us.drullk.jefi.JustEnoughFluidInteractions` only declares the mod id.
+- `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`), registered from the main class
+  constructor; `FluidInteractionsJeiPlugin.filter` applies it after probing. File
+  `config/justenoughfluidinteractions-client.toml`.
 
 ## Conventions and gotchas
 
@@ -72,11 +74,18 @@ Never read, print, or probe that file or those values.
   `Smoke test` log line, that dismissal is what to check first. The test deletes its save before creating it, so
   re-runs never load an existing world (loading one would stop on the experimental-world backup prompt).
 - Recipe ids (`justenoughfluidinteractions:<type namespace>/<type path>/<index>/<variant>`) must stay unique; JEI uses them for bookmarks.
+  `RecipeMerger` keeps the first member's id (probe order) when it collapses recipes, and includes the owner in its
+  merge keys so patterns from different mods stay separate.
+- Never call `FlowingFluid.getFlowing(level, falling)` on modded fluids: some register flowing states without the
+  `LEVEL` or `FALLING` property and `setValue` throws. Build the state with `defaultFluidState().trySetValue(...)`
+  as `InteractionProber` and `SceneArrangement` do.
 
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
 `Failed to bake`, and `No probe of fluid interaction ... succeeded` (expected once, for the dev fallback; any other
-is a regression). The smoke test also logs one `Smoke test recipe ...` line per recipe with owner, source-state and
-neighbor counts, and `... 0 offender(s)` for the duplicate-alternative check. Crop and enlarge screenshots with `sips`
+is a regression). Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
+`Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
+duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
+dev-only mergeable interactions (an `ERROR` there is a regression). Crop and enlarge screenshots with `sips`
 when a detail matters.
