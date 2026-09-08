@@ -75,9 +75,14 @@ Never read, print, or probe that file or those values.
   onboarding screen before the title screen. `JeiAutoTest` dismisses it itself; if a smoke test ever sits idle with no
   `Smoke test` log line, that dismissal is what to check first. The test deletes its save before creating it, so
   re-runs never load an existing world (loading one would stop on the experimental-world backup prompt).
-- Recipe ids (`justenoughfluidinteractions:<type namespace>/<type path>/<index>/<variant>`) must stay unique; JEI uses them for bookmarks.
-  `RecipeMerger` keeps the first member's id (probe order) when it collapses recipes, and includes the owner in its
-  merge keys so patterns from different mods stay separate.
+- Recipe ids are `justenoughfluidinteractions:<type namespace>/<type path>/<owner>/<n>/<variant>` and must stay
+  unique and stable across launches; JEI uses them for bookmarks. Probe order, which is also JEI's display order,
+  ranks fluid types `minecraft`, `neoforge`, then other namespaces alphabetically, then path
+  (`InteractionProber.LOCATION_ORDER`, never `ResourceLocation`'s path-first natural order); within a type it groups
+  interactions by owner in the same ranking and numbers them (`n`) with successes first, then the result block's
+  key, then registration index. Registration index alone is unstable because NeoForge dispatches mod setup in
+  parallel. `RecipeMerger` keeps the first member's id in that order and includes the owner in its merge keys so
+  patterns from different mods stay separate.
 - Never call `FlowingFluid.getFlowing(level, falling)` on modded fluids: some register flowing states without the
   `LEVEL` or `FALLING` property and `setValue` throws. Build the state with `defaultFluidState().trySetValue(...)`
   as `InteractionProber` and `SceneArrangement` do.
@@ -90,5 +95,6 @@ is a regression). Expect one `Merged N fluid interaction recipe(s) into M` line 
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
 duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
 dev-only mergeable interactions, and one `Smoke test flowing neighbor ...` line proving the cobblestone recipe
-carries a flowing water neighbor (an `ERROR` from either is a regression). Crop and enlarge screenshots with `sips`
+carries a flowing water neighbor (an `ERROR` from either is a regression), and one `Smoke test recipe ids <sha-256>`
+line; that hash must not change between runs of the same checkout. Crop and enlarge screenshots with `sips`
 when a detail matters.

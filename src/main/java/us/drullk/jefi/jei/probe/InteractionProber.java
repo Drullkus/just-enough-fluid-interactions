@@ -59,6 +59,29 @@ public final class InteractionProber {
     private static final int MAX_FIXED_POSITIONS = 3;
     private static final int MAX_SEARCH_CALLS = 50_000;
 
+    private static final String MINECRAFT = "minecraft";
+    private static final String NEOFORGE = "neoforge";
+    private static final ResourceLocation PENDING_ID = ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID, "pending");
+
+    /** Namespace-first ranking: {@code minecraft}, then {@code neoforge}, then everything else alphabetically. */
+    private static final Comparator<String> NAMESPACE_ORDER =
+            Comparator.comparingInt(InteractionProber::namespaceRank).thenComparing(Comparator.naturalOrder());
+
+    /**
+     * The comparator behind every ordering rule in this class: {@link #NAMESPACE_ORDER} on the namespace, then the
+     * path alphabetically. Never {@link ResourceLocation}'s natural order, which compares path before namespace.
+     */
+    static final Comparator<ResourceLocation> LOCATION_ORDER =
+            Comparator.comparing(ResourceLocation::getNamespace, NAMESPACE_ORDER).thenComparing(ResourceLocation::getPath);
+
+    /** {@link #NAMESPACE_ORDER} applied to an owner mod id; a null (unattributed) owner sorts last. */
+    private static final Comparator<String> OWNER_ORDER = Comparator.nullsLast(NAMESPACE_ORDER);
+
+    private static final Comparator<ProbedInteraction> WITHIN_OWNER_ORDER = Comparator
+            .<ProbedInteraction>comparingInt(interaction -> interaction.isFailure() ? 1 : 0)
+            .thenComparing(interaction -> resultKey(interaction.resultAtSource()), Comparator.nullsLast(LOCATION_ORDER))
+            .thenComparingInt(ProbedInteraction::registrationIndex);
+
     private final SandboxLevel level;
     /** Neighbor fluids for tier one: each fluid in source form, followed by its flowing form when it has one. */
     private final List<Placement> fluidCandidates;
@@ -95,32 +118,44 @@ public final class InteractionProber {
         allCandidates.addAll(blockCandidates);
     }
 
-    /** Probes every registered interaction, in registry-key order of the source fluid type. */
+    /**
+     * Probes every registered interaction. Fluid types are ordered by {@link #LOCATION_ORDER}; within one type,
+     * interactions are grouped by owner in the same namespace-first order (null owner last) and, within one owner
+     * group, ordered with successes before failures, then by the result block at the source position (again
+     * {@link #LOCATION_ORDER}, null result last), then by registration index. That order is what JEI displays and
+     * what recipe ids encode, so it stays the same across launches even though NeoForge dispatches mod setup — and
+     * therefore fluid interaction registration — in parallel.
+     */
     public List<FluidInteractionRecipe> probeAll() {
         List<Map.Entry<FluidType, List<InteractionInformation>>> entries = new ArrayList<>(RegisteredInteractions.get().entrySet());
-        entries.sort(Comparator.comparing(e -> keyOf(e.getKey()).toString()));
+        entries.sort(Comparator.comparing(e -> keyOf(e.getKey()), LOCATION_ORDER));
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>();
         long start = System.nanoTime();
+        int interactionCount = 0;
         for (var entry : entries) {
             List<InteractionInformation> interactions = List.copyOf(entry.getValue());
+            interactionCount += interactions.size();
+            List<ProbedInteraction> probed = new ArrayList<>(interactions.size());
             for (int i = 0; i < interactions.size(); i++) {
-                recipes.addAll(probe(entry.getKey(), i, interactions.get(i)));
+                probed.add(probe(entry.getKey(), i, interactions.get(i)));
             }
+            recipes.addAll(order(keyOf(entry.getKey()), probed));
         }
         List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
         LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
-                entries.stream().mapToInt(e -> e.getValue().size()).sum(), merged.size(), (System.nanoTime() - start) / 1_000_000);
+                interactionCount, merged.size(), (System.nanoTime() - start) / 1_000_000);
         return merged;
     }
 
-    private List<FluidInteractionRecipe> probe(FluidType type, int index, InteractionInformation interaction) {
+    private ProbedInteraction probe(FluidType type, int index, InteractionInformation interaction) {
         ResourceLocation key = keyOf(type);
         String owner = InteractionOwners.of(type, interaction);
         List<FluidState> sourceStates = sourceStates(type);
         if (sourceStates.isEmpty()) {
             LOGGER.info("Fluid interaction {}#{} (from {}) has no source fluid state to probe", key, index, InteractionOwners.describe(owner));
-            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type, owner), owner));
+            return new ProbedInteraction(index, owner,
+                    List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
         }
 
         Map<GroupKey, Group> groups = new LinkedHashMap<>();
@@ -161,19 +196,74 @@ public final class InteractionProber {
 
         if (groups.isEmpty()) {
             LOGGER.info("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
-            return List.of(FluidInteractionRecipe.failed(type, index, recipeId(key, index, 0), unable(type, owner), owner));
+            return new ProbedInteraction(index, owner,
+                    List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
         }
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>(groups.size());
-        int variant = 0;
         for (var entry : groups.entrySet()) {
             Group group = entry.getValue();
             recipes.add(new FluidInteractionRecipe(
-                    type, index, recipeId(key, index, variant++),
+                    type, index, PENDING_ID,
                     List.copyOf(group.sources), List.copyOf(group.neighbors),
                     entry.getKey().conditions(), entry.getKey().results(), null, owner));
         }
-        return recipes;
+        return new ProbedInteraction(index, owner, recipes);
+    }
+
+    /**
+     * Final probe order within one fluid type: owner groups ranked by {@link #OWNER_ORDER} (null owner last),
+     * then within a group successes before failures, then by the result block at the source position
+     * ({@link #LOCATION_ORDER}, null result last), then by registration index. An interaction's position in its
+     * ordered group is the {@code n} embedded in its recipe ids; variants keep their discovery order.
+     */
+    private static List<FluidInteractionRecipe> order(ResourceLocation typeKey, List<ProbedInteraction> probed) {
+        Map<String, List<ProbedInteraction>> byOwner = new LinkedHashMap<>();
+        for (ProbedInteraction interaction : probed) {
+            byOwner.computeIfAbsent(interaction.owner(), k -> new ArrayList<>()).add(interaction);
+        }
+        List<String> owners = new ArrayList<>(byOwner.keySet());
+        owners.sort(OWNER_ORDER);
+
+        List<FluidInteractionRecipe> ordered = new ArrayList<>();
+        for (String owner : owners) {
+            List<ProbedInteraction> group = byOwner.get(owner);
+            group.sort(WITHIN_OWNER_ORDER);
+            String ownerSegment = ownerSegment(owner);
+            int n = 0;
+            for (ProbedInteraction interaction : group) {
+                int variant = 0;
+                for (FluidInteractionRecipe recipe : interaction.recipes()) {
+                    ordered.add(withId(recipe, recipeId(typeKey, ownerSegment, n, variant++)));
+                }
+                n++;
+            }
+        }
+        return ordered;
+    }
+
+    private static FluidInteractionRecipe withId(FluidInteractionRecipe recipe, ResourceLocation id) {
+        return new FluidInteractionRecipe(recipe.sourceType(), recipe.index(), id, recipe.sources(), recipe.neighbors(),
+                recipe.conditions(), recipe.results(), recipe.failure(), recipe.owner());
+    }
+
+    private static @Nullable ResourceLocation resultKey(@Nullable BlockState state) {
+        return state != null ? BuiltInRegistries.BLOCK.getKey(state.getBlock()) : null;
+    }
+
+    /**
+     * Mod ids are already restricted to characters legal in a {@link ResourceLocation} path, but anything else is
+     * turned into {@code _} so a hostile or unexpected owner id can never split the id into extra path segments.
+     */
+    private static String ownerSegment(@Nullable String owner) {
+        String raw = owner != null ? owner : "unknown";
+        StringBuilder sanitized = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            boolean legal = c == '_' || c == '-' || c == '.' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+            sanitized.append(legal ? c : '_');
+        }
+        return sanitized.toString();
     }
 
     /**
@@ -303,9 +393,9 @@ public final class InteractionProber {
         return key != null ? key : ResourceLocation.fromNamespaceAndPath("unknown", "unregistered");
     }
 
-    private static ResourceLocation recipeId(ResourceLocation typeKey, int index, int variant) {
+    private static ResourceLocation recipeId(ResourceLocation typeKey, String ownerSegment, int n, int variant) {
         return ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID,
-                typeKey.getNamespace() + "/" + typeKey.getPath() + "/" + index + "/" + variant);
+                typeKey.getNamespace() + "/" + typeKey.getPath() + "/" + ownerSegment + "/" + n + "/" + variant);
     }
 
     private static Component unable(FluidType type, @Nullable String owner) {
@@ -313,6 +403,13 @@ public final class InteractionProber {
             return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable", type.getDescription());
         }
         return Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.unable_from", type.getDescription(), owner);
+    }
+
+    private static int namespaceRank(String namespace) {
+        if (MINECRAFT.equals(namespace)) {
+            return 0;
+        }
+        return NEOFORGE.equals(namespace) ? 1 : 2;
     }
 
     private record Run(boolean passed, List<BlockPos> reads, Map<BlockPos, BlockState> writes) {
@@ -328,5 +425,19 @@ public final class InteractionProber {
     private static final class Group {
         final Set<FluidState> sources = new LinkedHashSet<>();
         final Set<Placement> neighbors = new LinkedHashSet<>();
+    }
+
+    /**
+     * One interaction's probe result before it has a final id: every recipe it produced (a single failure recipe,
+     * or one recipe per outcome group, in discovery order) plus what step 2's ordering needs to place it.
+     */
+    private record ProbedInteraction(int registrationIndex, @Nullable String owner, List<FluidInteractionRecipe> recipes) {
+        boolean isFailure() {
+            return recipes.size() == 1 && recipes.getFirst().isFailure();
+        }
+
+        @Nullable BlockState resultAtSource() {
+            return recipes.getFirst().resultAtSource();
+        }
     }
 }

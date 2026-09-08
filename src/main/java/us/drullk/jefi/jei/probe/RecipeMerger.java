@@ -30,11 +30,15 @@ import net.neoforged.neoforge.fluids.FluidType;
  * unioning their source states. Neighbor alternatives compare by block state and still fluid plus the forms each
  * was matched in, so the exact flowing state a probe recorded never decides a merge. Failure recipes never merge.
  *
- * <p>A merged recipe keeps the id, source type and index of its first member in probe order, which is registry
- * key order of the source fluid type, then registration index, then probe variant. Recipe ids therefore stay
- * unique and stable across runs for an unchanged set of registered interactions, which is what JEI's bookmarks
- * need. Nothing that varies between runs takes part in a merge key, and output order follows first-member probe
- * order rather than any hash iteration order.
+ * <p>A merged recipe keeps the id, source type and index of its first member in probe order. Probe order ranks
+ * the source fluid type by namespace ({@code minecraft}, then {@code neoforge}, then everything else
+ * alphabetically) and then by path; within one type it ranks owner groups the same way (null owner last) and,
+ * within one owner group, orders successes before failures, then by the result block at the source position
+ * (again namespace-first, null result last), then by registration index, then by probe variant. Recipe ids
+ * therefore stay unique and stable across runs for an unchanged set of registered interactions — including when
+ * two mods race to register on the same fluid type during NeoForge's parallel mod-loading events — which is what
+ * JEI's bookmarks need. Nothing that varies between runs takes part in a merge key, and output order follows
+ * first-member probe order rather than any hash iteration order.
  */
 public final class RecipeMerger {
     private static final Logger LOGGER = LogUtils.getLogger();

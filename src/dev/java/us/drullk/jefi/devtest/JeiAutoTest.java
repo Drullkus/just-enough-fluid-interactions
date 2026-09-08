@@ -2,9 +2,13 @@ package us.drullk.jefi.devtest;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -100,6 +104,7 @@ public final class JeiAutoTest {
                     checkAlternatives(recipes);
                     checkMerging(recipes);
                     checkFlowingNeighbor(recipes);
+                    logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
                     timer = 30;
@@ -218,6 +223,21 @@ public final class JeiAutoTest {
         LOGGER.info("Smoke test flowing neighbor {} (from {}): {} of neighbor alternative(s) {}",
                 cobblestone.id(), cobblestone.owner(), flowing.describe().getString(),
                 cobblestone.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+    }
+
+    /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */
+    private static void logRecipeIds(List<FluidInteractionRecipe> found) {
+        List<String> ids = found.stream().map(recipe -> recipe.id().toString()).sorted().toList();
+        LOGGER.info("Smoke test recipe ids {}", sha256Hex(String.join(",", ids)));
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static void enterWorld(Minecraft mc) {
