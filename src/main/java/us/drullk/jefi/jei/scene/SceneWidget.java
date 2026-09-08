@@ -112,13 +112,13 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
         if (!contains(mouseX, mouseY)) {
             return;
         }
-        tooltip.add(Texts.key(after ? "after" : "before"));
+        tooltip.add(Texts.key(after ? "after" : "before").withStyle(ChatFormatting.GRAY));
         SceneArrangement.of(recipe, variant()).forEach((offset, placement) -> tooltip.add(
                 Component.literal("  ")
                         .append(placement.describe())
                         .append(" ")
                         .append(Texts.offset(offset))
-                        .withStyle(ChatFormatting.GRAY)));
+                        .withStyle(ChatFormatting.WHITE)));
         tooltip.add(Texts.drag().withStyle(ChatFormatting.DARK_GRAY));
     }
 
