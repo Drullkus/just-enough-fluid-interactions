@@ -59,7 +59,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private final SceneCache scenes;
 
     public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
-        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.createDrawableItemLike(Items.LAVA_BUCKET), WIDTH, HEIGHT);
+        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.createDrawableItemLike(Items.BUCKET), WIDTH, HEIGHT);
         this.scenes = scenes;
     }
 
