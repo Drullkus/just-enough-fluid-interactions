@@ -97,7 +97,7 @@ public final class FluidInteractionsJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipeCatalysts(IRecipeCatalystRegistration registration) {
-        registration.addRecipeCatalyst(Items.LAVA_BUCKET, TYPE);
+        registration.addRecipeCatalyst(Items.BUCKET, TYPE);
     }
 
     @Override
