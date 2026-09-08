@@ -45,7 +45,8 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  *     records which positions a predicate reads; a candidate is kept at a position when it makes the predicate
  *     read somewhere new, which is what short-circuit evaluation reveals once an earlier clause passes.</li>
  * </ol>
- * Anything that never fires, throws, or writes no block becomes a failure recipe.
+ * Anything that never fires, throws, or writes no block becomes a failure recipe. Recipes describing the same
+ * pattern are collapsed by {@link RecipeMerger} once every interaction has been probed.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -97,9 +98,10 @@ public final class InteractionProber {
                 recipes.addAll(probe(entry.getKey(), i, interactions.get(i)));
             }
         }
+        List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
         LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
-                entries.stream().mapToInt(e -> e.getValue().size()).sum(), recipes.size(), (System.nanoTime() - start) / 1_000_000);
-        return recipes;
+                entries.stream().mapToInt(e -> e.getValue().size()).sum(), merged.size(), (System.nanoTime() - start) / 1_000_000);
+        return merged;
     }
 
     private List<FluidInteractionRecipe> probe(FluidType type, int index, InteractionInformation interaction) {

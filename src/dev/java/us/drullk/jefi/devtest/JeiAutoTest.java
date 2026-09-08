@@ -21,14 +21,18 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
 import net.minecraft.world.level.WorldDataConfiguration;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
+import net.minecraft.world.level.material.Fluid;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -91,6 +95,7 @@ public final class JeiAutoTest {
                     recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
                     LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
                     checkAlternatives(recipes);
+                    checkMerging(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
                     timer = 30;
@@ -145,6 +150,41 @@ public final class JeiAutoTest {
                     recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
         }
         LOGGER.info("Smoke test checked {} recipe(s) for duplicate neighbor alternatives, {} offender(s)", found.size(), offenders);
+    }
+
+    /**
+     * The dev interactions registered for two fluid types with the same neighbors and result have to arrive as one
+     * recipe holding every source fluid and every neighbor, which only happens if both merge passes ran.
+     */
+    private static void checkMerging(List<FluidInteractionRecipe> found) {
+        BlockState result = JeiAutoTestInteractions.MERGE_RESULT.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> result.equals(recipe.resultAtSource()))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected the mergeable dev interactions to collapse into one recipe, found {}", matches.size());
+            return;
+        }
+        FluidInteractionRecipe merged = matches.getFirst();
+        List<Fluid> fluids = merged.sourceFluids();
+        LOGGER.info("Smoke test merged recipe {} (from {}): source fluid(s) {}, neighbor alternative(s) {}",
+                merged.id(), merged.owner(),
+                fluids.stream().map(fluid -> BuiltInRegistries.FLUID.getKey(fluid).toString()).toList(),
+                merged.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+        List<Fluid> expectedFluids = JeiAutoTestInteractions.MERGE_TYPES.stream()
+                .flatMap(type -> BuiltInRegistries.FLUID.stream()
+                        .filter(fluid -> fluid.getFluidType() == type.value() && fluid.defaultFluidState().isSource()))
+                .toList();
+        for (Fluid fluid : expectedFluids) {
+            if (!fluids.contains(fluid)) {
+                LOGGER.error("Smoke test merged recipe {} is missing source fluid {}", merged.id(), BuiltInRegistries.FLUID.getKey(fluid));
+            }
+        }
+        for (Block neighbor : JeiAutoTestInteractions.MERGE_NEIGHBORS) {
+            if (merged.neighbors().stream().noneMatch(placement -> placement.block().is(neighbor))) {
+                LOGGER.error("Smoke test merged recipe {} is missing neighbor alternative {}", merged.id(), BuiltInRegistries.BLOCK.getKey(neighbor));
+            }
+        }
     }
 
     private static void enterWorld(Minecraft mc) {
