@@ -49,6 +49,9 @@ public final class SceneRenderer {
     }
 
     /**
+     * <p>The widget leaves no depth behind: its depth values are cleared again after it draws, so anything JEI
+     * draws later at this position wins the depth test regardless of how close the scene geometry came to camera.
+     *
      * @param graphics the GUI graphics, whose pose must already be translated to the widget's top-left corner
      * @param width    widget width in GUI units
      * @param height   widget height in GUI units
@@ -100,6 +103,8 @@ public final class SceneRenderer {
         }
 
         RenderSystem.viewport(0, 0, window.getWidth(), window.getHeight());
+        RenderSystem.depthMask(true);
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
         graphics.disableScissor();
     }
 
