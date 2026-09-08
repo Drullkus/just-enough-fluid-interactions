@@ -267,7 +267,7 @@ public final class InteractionProber {
             }
             states.add(still);
             if (fluid instanceof FlowingFluid flowing) {
-                FluidState flow = flowing.getFlowing(7, false);
+                FluidState flow = flowing.getFlowing().defaultFluidState().trySetValue(FlowingFluid.LEVEL, 7).trySetValue(FlowingFluid.FALLING, false);
                 if (!flow.isEmpty() && !flow.isSource()) {
                     states.add(flow);
                 }

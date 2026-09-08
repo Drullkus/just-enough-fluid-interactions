@@ -103,7 +103,7 @@ public final class SceneArrangement {
     /** The state to draw at the source position: flowing when the interaction matched a flowing source. */
     private static FluidState sourceForm(FluidInteractionRecipe recipe, Fluid fluid) {
         if (recipe.matchesFlowingForm() && fluid instanceof FlowingFluid flowing) {
-            return flowing.getFlowing(DISPLAY_FLOW_LEVEL, false);
+            return flowing.getFlowing().defaultFluidState().trySetValue(FlowingFluid.LEVEL, DISPLAY_FLOW_LEVEL).trySetValue(FlowingFluid.FALLING, false);
         }
         return fluid.defaultFluidState();
     }
