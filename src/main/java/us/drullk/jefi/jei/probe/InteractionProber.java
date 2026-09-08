@@ -153,7 +153,7 @@ public final class InteractionProber {
         String owner = InteractionOwners.of(type, interaction);
         List<FluidState> sourceStates = sourceStates(type);
         if (sourceStates.isEmpty()) {
-            LOGGER.info("Fluid interaction {}#{} (from {}) has no source fluid state to probe", key, index, InteractionOwners.describe(owner));
+            LOGGER.debug("Fluid interaction {}#{} (from {}) has no source fluid state to probe", key, index, InteractionOwners.describe(owner));
             return new ProbedInteraction(index, owner,
                     List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
         }
@@ -195,7 +195,7 @@ public final class InteractionProber {
         }
 
         if (groups.isEmpty()) {
-            LOGGER.info("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
+            LOGGER.debug("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
             return new ProbedInteraction(index, owner,
                     List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
         }

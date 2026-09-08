@@ -24,7 +24,7 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 ## Agent workflow
 
 - Work happens on a task branch in its own worktree: one wrap-up commit, never `main`, never a push.
-- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is info-level and expected exactly once).
+- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is debug-level, which the dev run's `run/logs/latest.log` still records, and is expected exactly once; the smoke test's `Smoke test recipe ... (from justenoughfluidinteractions): 0 source state(s)` line for the fallback recipe is the same evidence at info).
 
 ## Credentials
 
@@ -90,8 +90,10 @@ Never read, print, or probe that file or those values.
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
-`Failed to bake`, and `No probe of fluid interaction ... succeeded` (expected once, for the dev fallback; any other
-is a regression). Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
+`Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, still present in the dev run's
+`latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
+debug so a large pack does not spam the production log; production users see failures only as "Unable to process"
+recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
 duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
 dev-only mergeable interactions, and one `Smoke test flowing neighbor ...` line proving the cobblestone recipe
