@@ -39,7 +39,7 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  *
  * <p>Interactions are opaque predicate/action pairs, so each one is exercised in tiers:
  * <ol>
- *     <li>every registered still fluid as the neighbor;</li>
+ *     <li>every registered fluid as the neighbor, in source form and, where one exists, in flowing form;</li>
  *     <li>every registered block's default state as the neighbor;</li>
  *     <li>a greedy multi-position search for predicates that inspect more than the neighbor. The sandbox
  *     records which positions a predicate reads; a candidate is kept at a position when it makes the predicate
@@ -60,17 +60,27 @@ public final class InteractionProber {
     private static final int MAX_SEARCH_CALLS = 50_000;
 
     private final SandboxLevel level;
+    /** Neighbor fluids for tier one: each fluid in source form, followed by its flowing form when it has one. */
     private final List<Placement> fluidCandidates;
     private final List<Placement> blockCandidates;
+    /** Candidates for the multi-position search, where fluids only appear in source form. */
     private final List<Placement> allCandidates;
 
     public InteractionProber(RegistryAccess access) {
         this.level = new SandboxLevel(access);
         this.fluidCandidates = new ArrayList<>();
+        List<Placement> stillCandidates = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
-            FluidState state = fluid.defaultFluidState();
-            if (fluid != Fluids.EMPTY && state.isSource()) {
-                fluidCandidates.add(Placement.ofFluid(state));
+            FluidState still = fluid.defaultFluidState();
+            if (fluid == Fluids.EMPTY || !still.isSource()) {
+                continue;
+            }
+            Placement source = Placement.ofFluid(still);
+            stillCandidates.add(source);
+            fluidCandidates.add(source);
+            FluidState flow = flowingForm(fluid);
+            if (flow != null) {
+                fluidCandidates.add(Placement.ofFluid(flow));
             }
         }
         this.blockCandidates = new ArrayList<>();
@@ -80,8 +90,8 @@ public final class InteractionProber {
                 blockCandidates.add(Placement.ofBlock(state));
             }
         }
-        this.allCandidates = new ArrayList<>(fluidCandidates.size() + blockCandidates.size());
-        allCandidates.addAll(fluidCandidates);
+        this.allCandidates = new ArrayList<>(stillCandidates.size() + blockCandidates.size());
+        allCandidates.addAll(stillCandidates);
         allCandidates.addAll(blockCandidates);
     }
 
@@ -266,14 +276,26 @@ public final class InteractionProber {
                 continue;
             }
             states.add(still);
-            if (fluid instanceof FlowingFluid flowing) {
-                FluidState flow = flowing.getFlowing().defaultFluidState().trySetValue(FlowingFluid.LEVEL, 7).trySetValue(FlowingFluid.FALLING, false);
-                if (!flow.isEmpty() && !flow.isSource()) {
-                    states.add(flow);
-                }
+            FluidState flow = flowingForm(fluid);
+            if (flow != null) {
+                states.add(flow);
             }
         }
         return states;
+    }
+
+    /**
+     * A full-height flowing state of a still fluid, or null when it has none. Modded fluids may register a flowing
+     * fluid without the level properties, so the state is only ever narrowed with {@code trySetValue}.
+     */
+    private static @Nullable FluidState flowingForm(Fluid fluid) {
+        if (!(fluid instanceof FlowingFluid flowing)) {
+            return null;
+        }
+        FluidState flow = flowing.getFlowing().defaultFluidState()
+                .trySetValue(FlowingFluid.LEVEL, 7)
+                .trySetValue(FlowingFluid.FALLING, false);
+        return !flow.isEmpty() && !flow.isSource() ? flow : null;
     }
 
     public static ResourceLocation keyOf(FluidType type) {

@@ -22,8 +22,9 @@ import net.neoforged.neoforge.fluids.FluidStack;
  *
  * <p>Whatever is drawn in a flowing form gets a full source block of the same fluid placed on its far side:
  * vanilla only uses the flowing top texture while the flow vector is non-zero, which needs a higher fluid to
- * flow from. The source position's far side is the one opposite the neighbor, so the arrangement reads
- * source, flowing block, neighbor.
+ * flow from. The far side of the source position is the one opposite the neighbor and the far side of the
+ * neighbor position the one away from the source, so a row of up to four blocks reads outwards in both
+ * directions: neighbor source, flowing neighbor, flowing source, source.
  */
 public final class SceneArrangement {
     /** Fluid level of a block drawn in its flowing form; probing uses a full flow, this only has to read as one. */
@@ -47,7 +48,7 @@ public final class SceneArrangement {
         List<Placement> neighbors = recipe.neighbors();
         BlockPos neighborPos = FluidInteractionRecipe.NEIGHBOR_OFFSET;
         if (!neighbors.isEmpty()) {
-            scene.put(neighborPos, neighbors.get(Math.floorMod(variant.neighbor(), neighbors.size())));
+            scene.put(neighborPos, displayForm(neighbors.get(Math.floorMod(variant.neighbor(), neighbors.size()))));
         }
         scene.putAll(recipe.conditions());
 
@@ -74,19 +75,35 @@ public final class SceneArrangement {
         return 0;
     }
 
-    /** Index of the neighbor alternative a slot is currently displaying, or 0 when it shows something unexpected. */
+    /**
+     * Index of the neighbor alternative a slot is currently displaying, or 0 when it shows something unexpected.
+     *
+     * <p>A JEI slot only ever shows a still fluid, so both forms of one fluid look the same in it. When a recipe
+     * holds both, the flowing one is the placement the scene draws: it was verified by the probe just as the still
+     * one was, and it is the more informative arrangement.
+     */
     public static int neighborIndex(FluidInteractionRecipe recipe, @Nullable ITypedIngredient<?> displayed) {
         if (displayed == null) {
             return 0;
         }
         Object ingredient = displayed.getIngredient();
         List<Placement> neighbors = recipe.neighbors();
+        int match = 0;
+        boolean matched = false;
         for (int i = 0; i < neighbors.size(); i++) {
-            if (shows(neighbors.get(i), ingredient)) {
+            Placement neighbor = neighbors.get(i);
+            if (!shows(neighbor, ingredient)) {
+                continue;
+            }
+            if (neighbor.isFlowing()) {
                 return i;
             }
+            if (!matched) {
+                match = i;
+                matched = true;
+            }
         }
-        return 0;
+        return match;
     }
 
     private static boolean shows(Placement placement, Object ingredient) {
@@ -98,6 +115,19 @@ public final class SceneArrangement {
             return !item.isEmpty() && ItemStack.isSameItem(item, stack);
         }
         return false;
+    }
+
+    /**
+     * The placement to draw for a probed alternative: a fluid verified in flowing form is redrawn at the display
+     * flow level, everything else is drawn as probed.
+     */
+    private static Placement displayForm(Placement placement) {
+        if (!placement.isFlowing() || !(placement.effectiveFluid().getType() instanceof FlowingFluid flowing)) {
+            return placement;
+        }
+        return Placement.ofFluid(flowing.getFlowing().defaultFluidState()
+                .trySetValue(FlowingFluid.LEVEL, DISPLAY_FLOW_LEVEL)
+                .trySetValue(FlowingFluid.FALLING, false));
     }
 
     /** The state to draw at the source position: flowing when the interaction matched a flowing source. */

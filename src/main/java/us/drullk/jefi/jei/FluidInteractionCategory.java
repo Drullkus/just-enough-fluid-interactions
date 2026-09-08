@@ -1,6 +1,8 @@
 package us.drullk.jefi.jei;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -173,11 +175,18 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return slot.setStandardSlotBackground().setFluidRenderer(FluidType.BUCKET_VOLUME, false, 16, 16);
     }
 
-    /** Adds each placement as a fluid or item ingredient; blocks without an item are only shown in the scene. */
+    /**
+     * Adds each placement as a fluid or item ingredient; blocks without an item are only shown in the scene.
+     * JEI only knows still fluids, so both forms of one fluid share a single cycling entry.
+     */
     private static void addPlacements(IRecipeSlotBuilder slot, List<Placement> placements) {
+        Set<Fluid> fluids = new LinkedHashSet<>();
         for (Placement placement : placements) {
             if (placement.isFluid()) {
-                slot.addFluidStack(placement.effectiveFluid().getType(), FluidType.BUCKET_VOLUME);
+                Fluid fluid = FluidInteractionRecipe.stillForm(placement.effectiveFluid());
+                if (fluids.add(fluid)) {
+                    slot.addFluidStack(fluid, FluidType.BUCKET_VOLUME);
+                }
                 continue;
             }
             ItemStack item = placement.asItem();

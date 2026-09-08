@@ -67,7 +67,9 @@ Never read, print, or probe that file or those values.
 - Interaction owners come from `InteractionOwners`: the lambda's declaring class, then the namespace of captured
   registry objects. A third-party mod using `InteractionInformation`'s convenience constructors with only vanilla
   blocks still reads as `neoforge`; treat attribution as approximate.
-- JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`.
+- JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`. Neighbor
+  placements carry the fluid form the probe verified (`Placement.isFlowing`, described as "Flowing <fluid>");
+  when a recipe holds both forms of one fluid the scene draws the flowing one (`SceneArrangement.neighborIndex`).
 - JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
 - A fresh `run/` directory (every new worktree) has no `options.txt`, so the client opens the accessibility
   onboarding screen before the title screen. `JeiAutoTest` dismisses it itself; if a smoke test ever sits idle with no
@@ -87,5 +89,6 @@ Compile, then run the smoke test and read the screenshots. Check the log for `Pr
 is a regression). Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
 duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
-dev-only mergeable interactions (an `ERROR` there is a regression). Crop and enlarge screenshots with `sips`
+dev-only mergeable interactions, and one `Smoke test flowing neighbor ...` line proving the cobblestone recipe
+carries a flowing water neighbor (an `ERROR` from either is a regression). Crop and enlarge screenshots with `sips`
 when a detail matters.

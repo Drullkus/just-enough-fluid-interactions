@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.Placement;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -29,10 +30,12 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
 import net.minecraft.world.level.WorldDataConfiguration;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -96,6 +99,7 @@ public final class JeiAutoTest {
                     LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
                     checkAlternatives(recipes);
                     checkMerging(recipes);
+                    checkFlowingNeighbor(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
                     timer = 30;
@@ -185,6 +189,35 @@ public final class JeiAutoTest {
                 LOGGER.error("Smoke test merged recipe {} is missing neighbor alternative {}", merged.id(), BuiltInRegistries.BLOCK.getKey(neighbor));
             }
         }
+    }
+
+    /**
+     * Vanilla's cobblestone interaction accepts its water neighbor in either form, so the probe has to record the
+     * flowing one as an alternative for the scene to draw the neighbor flowing.
+     */
+    private static void checkFlowingNeighbor(List<FluidInteractionRecipe> found) {
+        BlockState result = Blocks.COBBLESTONE.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> result.equals(recipe.resultAtSource()))
+                .filter(recipe -> recipe.sourceFluids().contains(Fluids.LAVA))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one cobblestone recipe from lava, found {}", matches.size());
+            return;
+        }
+        FluidInteractionRecipe cobblestone = matches.getFirst();
+        Placement flowing = cobblestone.neighbors().stream()
+                .filter(placement -> placement.isFlowing() && FluidInteractionRecipe.stillForm(placement.effectiveFluid()) == Fluids.WATER)
+                .findFirst()
+                .orElse(null);
+        if (flowing == null) {
+            LOGGER.error("Smoke test found no flowing water neighbor alternative in {}: {}", cobblestone.id(),
+                    cobblestone.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+            return;
+        }
+        LOGGER.info("Smoke test flowing neighbor {} (from {}): {} of neighbor alternative(s) {}",
+                cobblestone.id(), cobblestone.owner(), flowing.describe().getString(),
+                cobblestone.neighbors().stream().map(placement -> placement.describe().getString()).toList());
     }
 
     private static void enterWorld(Minecraft mc) {

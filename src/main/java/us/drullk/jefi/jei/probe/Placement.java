@@ -2,6 +2,8 @@ package us.drullk.jefi.jei.probe;
 
 import org.jetbrains.annotations.Nullable;
 
+import us.drullk.jefi.JustEnoughFluidInteractions;
+
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -32,6 +34,12 @@ public record Placement(BlockState block, @Nullable FluidState fluid) {
         return !effectiveFluid().isEmpty();
     }
 
+    /** A fluid placement whose state is not a source block, so it renders and reads as a flow. */
+    public boolean isFlowing() {
+        FluidState state = effectiveFluid();
+        return !state.isEmpty() && !state.isSource();
+    }
+
     /** The item that best represents this placement in a JEI slot, or empty when the block has no item. */
     public ItemStack asItem() {
         if (isFluid()) {
@@ -43,7 +51,10 @@ public record Placement(BlockState block, @Nullable FluidState fluid) {
 
     public Component describe() {
         if (isFluid()) {
-            return effectiveFluid().getFluidType().getDescription();
+            Component fluid = effectiveFluid().getFluidType().getDescription();
+            return isFlowing()
+                    ? Component.translatable("jei." + JustEnoughFluidInteractions.MODID + ".fluid_interactions.form.flowing_of", fluid)
+                    : fluid;
         }
         return block.getBlock().getName();
     }

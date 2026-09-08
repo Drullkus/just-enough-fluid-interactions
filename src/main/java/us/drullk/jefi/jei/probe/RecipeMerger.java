@@ -2,6 +2,7 @@ package us.drullk.jefi.jei.probe;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * <p>Two passes run over the recipe list in probe order. The first merges recipes of one source type whose
  * conditions, results, source forms and owner match, unioning their neighbor alternatives; the second merges
  * recipes of any source type whose neighbor alternatives, conditions, results, source forms and owner match,
- * unioning their source states. Failure recipes never merge.
+ * unioning their source states. Neighbor alternatives compare by block state and still fluid plus the forms each
+ * was matched in, so the exact flowing state a probe recorded never decides a merge. Failure recipes never merge.
  *
  * <p>A merged recipe keeps the id, source type and index of its first member in probe order, which is registry
  * key order of the source fluid type, then registration index, then probe variant. Recipe ids therefore stay
@@ -78,7 +80,7 @@ public final class RecipeMerger {
     }
 
     private static Object acrossTypes(FluidInteractionRecipe recipe) {
-        return new AcrossTypes(Set.copyOf(recipe.neighbors()), recipe.owner(), recipe.conditions(), recipe.results(), forms(recipe));
+        return new AcrossTypes(neighborForms(recipe), recipe.owner(), recipe.conditions(), recipe.results(), forms(recipe));
     }
 
     /** Which forms the source was matched in, as a bit mask, so a still-only pattern never merges with a flowing one. */
@@ -86,12 +88,39 @@ public final class RecipeMerger {
         return (recipe.matchesSourceForm() ? FORM_SOURCE : 0) | (recipe.matchesFlowingForm() ? FORM_FLOWING : 0);
     }
 
+    /**
+     * The neighbor alternatives as a form-normalized set: one entry per distinct block state and still fluid,
+     * carrying a bit mask of the forms that alternative was matched in. Two recipes therefore describe the same
+     * neighbor slot when they accept the same things in the same forms, whatever flowing state the probe recorded.
+     */
+    private static Set<NeighborForms> neighborForms(FluidInteractionRecipe recipe) {
+        Map<Placement, Integer> forms = new LinkedHashMap<>();
+        for (Placement neighbor : recipe.neighbors()) {
+            forms.merge(stillForm(neighbor), neighbor.isFlowing() ? FORM_FLOWING : FORM_SOURCE, (a, b) -> a | b);
+        }
+        Set<NeighborForms> normalized = new LinkedHashSet<>();
+        forms.forEach((placement, mask) -> normalized.add(new NeighborForms(placement, mask)));
+        return normalized;
+    }
+
+    /** A fluid alternative reduced to its still form; anything else is already its own normal form. */
+    private static Placement stillForm(Placement placement) {
+        if (!placement.isFluid()) {
+            return placement;
+        }
+        return Placement.ofFluid(FluidInteractionRecipe.stillForm(placement.effectiveFluid()).defaultFluidState());
+    }
+
     private record WithinType(FluidType sourceType, @Nullable String owner, Map<BlockPos, Placement> conditions,
                               Map<BlockPos, BlockState> results, int forms) {
     }
 
-    private record AcrossTypes(Set<Placement> neighbors, @Nullable String owner, Map<BlockPos, Placement> conditions,
+    private record AcrossTypes(Set<NeighborForms> neighbors, @Nullable String owner, Map<BlockPos, Placement> conditions,
                                Map<BlockPos, BlockState> results, int forms) {
+    }
+
+    /** One neighbor alternative in its still form, with the forms it was matched in as a bit mask. */
+    private record NeighborForms(Placement neighbor, int forms) {
     }
 
     /** Members of one merge; the first one supplies everything the merged recipe does not union. */
