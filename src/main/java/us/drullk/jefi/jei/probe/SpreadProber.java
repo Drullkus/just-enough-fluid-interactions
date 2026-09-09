@@ -69,9 +69,10 @@ public final class SpreadProber {
     }
 
     /**
-     * Every recipe the spread of one fluid type produces, in display order: owner groups ranked as
-     * {@link InteractionProber#OWNER_ORDER} ranks them, then the target position in probe order, then the result
-     * block. A fluid that hardens nothing yields nothing; there are no failure recipes here.
+     * Every recipe the spread of one fluid type produces, ordered by owner as {@link InteractionProber#OWNER_ORDER}
+     * ranks them, then by the target position in probe order, then by the result block. {@link InteractionProber}
+     * folds these into the type's registry-derived recipes owner group by owner group. A fluid that hardens
+     * nothing yields nothing; there are no failure recipes here.
      */
     public List<FluidInteractionRecipe> probe(FluidType type, List<FluidState> sources) {
         Map<Outcome, Group> outcomes = new LinkedHashMap<>();

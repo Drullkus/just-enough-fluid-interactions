@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.InteractionProber;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.probe.SpreadProber;
 import com.mojang.logging.LogUtils;
@@ -30,6 +31,7 @@ import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
@@ -59,6 +61,7 @@ public final class JeiAutoTest {
     private static final String WORLD_NAME = "jei_fluid_interactions_test";
     private static final int RECIPES_PER_SHOT = 2;
     private static final int MAX_SHOTS = 10;
+    private static final ResourceLocation LAVA_TYPE = ResourceLocation.withDefaultNamespace("lava");
 
     private static int phase;
     private static int timer;
@@ -108,6 +111,7 @@ public final class JeiAutoTest {
                     checkMerging(recipes);
                     checkFlowingNeighbor(recipes);
                     checkSpreadRecipe(recipes);
+                    checkOwnerOrder(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -279,6 +283,36 @@ public final class JeiAutoTest {
                 stoneRecipe.id(), stoneRecipe.owner(), stoneRecipe.sources().size(),
                 BuiltInRegistries.BLOCK.getKey(stone.getBlock()), SpreadProber.BELOW_OFFSET.toShortString(),
                 stoneRecipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+    }
+
+    /**
+     * Within one fluid type the display order ranks owners, so vanilla's stone — owned by {@code minecraft} and
+     * found by the spread probe — has to precede every {@code minecraft:lava} recipe owned by a third party,
+     * including the dev-only ones registered here.
+     */
+    private static void checkOwnerOrder(List<FluidInteractionRecipe> found) {
+        if (spreadRecipe == null) {
+            LOGGER.error("Smoke test has no stone spread recipe to check the owner order against");
+            return;
+        }
+        int stone = found.indexOf(spreadRecipe);
+        List<FluidInteractionRecipe> thirdParty = found.stream()
+                .filter(recipe -> LAVA_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> !"minecraft".equals(recipe.owner()) && !"neoforge".equals(recipe.owner()))
+                .toList();
+        if (thirdParty.isEmpty()) {
+            LOGGER.error("Smoke test found no third-party {} recipe to order the stone recipe against", LAVA_TYPE);
+            return;
+        }
+        for (FluidInteractionRecipe recipe : thirdParty) {
+            if (found.indexOf(recipe) < stone) {
+                LOGGER.error("Smoke test found {} (from {}) at index {} before the stone recipe {} at index {}",
+                        recipe.id(), recipe.owner(), found.indexOf(recipe), spreadRecipe.id(), stone);
+            }
+        }
+        LOGGER.info("Smoke test order {} (from {}) at index {} of {}, before {} third-party {} recipe(s) at {}",
+                spreadRecipe.id(), spreadRecipe.owner(), stone, found.size(), thirdParty.size(), LAVA_TYPE,
+                thirdParty.stream().map(recipe -> found.indexOf(recipe)).toList());
     }
 
     private static boolean waterNeighbor(FluidInteractionRecipe recipe, boolean flowing) {

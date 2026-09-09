@@ -127,8 +127,9 @@ public final class InteractionProber {
      * what recipe ids encode, so it stays the same across launches even though NeoForge dispatches mod setup — and
      * therefore fluid interaction registration — in parallel.
      *
-     * <p>What {@link SpreadProber} finds for a type follows that type's registered interactions, so adding the
-     * spread tier leaves the existing display order and every existing recipe id alone.
+     * <p>What {@link SpreadProber} finds for a type is folded into the same owner groups: within one type the
+     * owner ranking decides the order, and within one owner every registry-derived recipe precedes every
+     * spread-discovered one. Recipe ids are assigned before that regrouping, so they never depend on it.
      */
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
@@ -169,8 +170,7 @@ public final class InteractionProber {
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>();
         for (FluidType type : types) {
-            recipes.addAll(fromRegistry.getOrDefault(type, List.of()));
-            recipes.addAll(fromSpread.getOrDefault(type, List.of()));
+            recipes.addAll(byOwner(fromRegistry.getOrDefault(type, List.of()), fromSpread.getOrDefault(type, List.of())));
         }
         List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
         LOGGER.info("Probed fluid spread of {} fluid type(s) into {} JEI recipe(s) in {} ms",
@@ -178,6 +178,31 @@ public final class InteractionProber {
         LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
                 interactionCount, merged.size(), (registryNanos + spreadNanos) / 1_000_000);
         return merged;
+    }
+
+    /**
+     * One fluid type's registry-derived and spread-discovered recipes as a single list: owner groups ranked by
+     * {@link #OWNER_ORDER}, and within one owner every registry recipe, in its own order, before every spread
+     * recipe, in its own order. Both inputs already carry their ids and are already grouped by owner in that
+     * ranking, so this regroups them without changing any recipe, id or numbering.
+     */
+    private static List<FluidInteractionRecipe> byOwner(List<FluidInteractionRecipe> registry, List<FluidInteractionRecipe> spread) {
+        Map<String, List<FluidInteractionRecipe>> registryByOwner = new LinkedHashMap<>();
+        registry.forEach(recipe -> registryByOwner.computeIfAbsent(recipe.owner(), k -> new ArrayList<>()).add(recipe));
+        Map<String, List<FluidInteractionRecipe>> spreadByOwner = new LinkedHashMap<>();
+        spread.forEach(recipe -> spreadByOwner.computeIfAbsent(recipe.owner(), k -> new ArrayList<>()).add(recipe));
+
+        Set<String> owners = new LinkedHashSet<>(registryByOwner.keySet());
+        owners.addAll(spreadByOwner.keySet());
+        List<String> ordered = new ArrayList<>(owners);
+        ordered.sort(OWNER_ORDER);
+
+        List<FluidInteractionRecipe> result = new ArrayList<>(registry.size() + spread.size());
+        for (String owner : ordered) {
+            result.addAll(registryByOwner.getOrDefault(owner, List.of()));
+            result.addAll(spreadByOwner.getOrDefault(owner, List.of()));
+        }
+        return result;
     }
 
     /** Every fluid type that either has registered interactions or has a fluid to tick, in {@link #LOCATION_ORDER}. */
