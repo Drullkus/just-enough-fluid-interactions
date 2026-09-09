@@ -163,6 +163,7 @@ neoForge {
 configurations {
     runtimeClasspath.extendsFrom localRuntime
     devImplementation.extendsFrom implementation
+    devCompileOnly.extendsFrom compileOnly
     devRuntimeOnly.extendsFrom runtimeClasspath
 }
 

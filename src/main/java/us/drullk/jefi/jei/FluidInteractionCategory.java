@@ -7,6 +7,7 @@ import java.util.Set;
 import mezz.jei.common.Internal;
 import org.jetbrains.annotations.Nullable;
 
+import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.scene.SceneCache;
@@ -28,7 +29,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidType;
@@ -45,6 +45,9 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     public static final int WIDTH = 170;
     public static final int HEIGHT = 100;
 
+    private static final ResourceLocation ICON = ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID, "textures/gui/icon.png");
+    private static final int ICON_SIZE = 16;
+
     private static final int ROW_Y = 6;
     /** Footprint of a slot including its background, which JEI draws one pixel outside the ingredient. */
     private static final int SLOT_SIZE = 18;
@@ -60,7 +63,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private final SceneCache scenes;
 
     public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
-        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.createDrawableItemLike(Items.BUCKET), WIDTH, HEIGHT);
+        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
         this.scenes = scenes;
     }
 
