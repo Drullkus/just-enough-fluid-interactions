@@ -4,6 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import mezz.jei.common.Internal;
 import org.jetbrains.annotations.Nullable;
 
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
@@ -115,7 +116,9 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         int[] inputs = inputSlotX(recipe);
         for (int i = 1; i < inputs.length; i++) {
             int gapX = inputs[i - 1] - 1 + SLOT_SIZE;
-            builder.addRecipePlusSignWidget().setPosition(gapX, ROW_Y, PLUS_GAP, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
+            builder
+                    .addDrawable(Internal.getTextures().getRecipePlusSign()) // FIXME replace with .addRecipePlusSignWidget()
+                    .setPosition(gapX, ROW_Y, PLUS_GAP, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
         }
 
         SceneRotation rotation = new SceneRotation();
@@ -124,7 +127,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         IRecipeSlotView neighbor = slots.findSlotByName("neighbor").orElse(null);
 
         builder.addWidget(scene(builder, recipe, false, rotation, source, neighbor, BEFORE_X));
-        builder.addRecipeArrowWidget()
+        builder
+                .addDrawable(Internal.getTextures().getRecipeArrow()) // FIXME replace with .addRecipeArrowWidget()
                 .setPosition(BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
         builder.addWidget(scene(builder, recipe, true, rotation, source, neighbor, AFTER_X));
     }

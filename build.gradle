@@ -191,7 +191,10 @@ dependencies {
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 
-    implementation "curse.maven:jei-238222:8815666"
+    // Ensure compiling for older JEI and working on newer
+    compileOnly "curse.maven:jei-238222:7391682"
+    runtimeOnly "curse.maven:jei-238222:8815666"
+
     implementation "curse.maven:gaia-dimension-302529:7021516"
 
     implementation "curse.maven:create-328085:7963363"

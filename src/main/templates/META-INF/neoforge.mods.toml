@@ -91,7 +91,7 @@ View fluid interactions between blocks and liquids in JEI.
     modId="jei"
     type="required"
     # This version range declares a minimum of the current minecraft version up to but not including the next major version
-    versionRange="[19.51.0.418,)"
+    versionRange="[19.27.0.336,)"
     ordering="NONE"
     side="BOTH"
 
