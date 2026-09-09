@@ -7,7 +7,9 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 
 - Minecraft 1.21.1, NeoForge 21.1.249, ModDevGradle 2.0.146, Gradle wrapper 9.2.1, Java toolchain 21.
 - Parchment 2024.11.17 for 1.21.1.
-- JEI `curse.maven:jei-238222:8815666` (19.53.0.425), full jar on the compile classpath.
+- JEI: the full jar, as two file ids in `build.gradle`. `compileOnly` is the oldest supported release, the minimum
+  of the `versionRange` in `src/main/templates/META-INF/neoforge.mods.toml`; `runtimeOnly` is a current release.
+  Raise the minimum only together with the compile jar.
 - Gaia Dimension `curse.maven:gaia-dimension-302529:7021516` (1.21-2.2.288), a mod that registers 11 interactions.
 - Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, bundled jar-in-jar. Version in
   `gradle.properties` (`gander_version`), currently the published `0.2.32`; the jar-in-jar range is `[0.2,1.0)`.
@@ -20,11 +22,12 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 - Don't renumber, duplicate, or invent new task numbers anywhere — not in code, comments, commit messages, or branch names.
 - Agents working in a worktree do not edit `CLAUDE.md` themselves. Report doc-relevant findings (a task is done, an assumption changed, a fact here is now wrong) in your final summary; the user reconciles the docs centrally. This avoids conflicting edits to the same file across parallel branches.
 - If your change makes a fact in `CLAUDE.md` or other Markdown file false (a renamed package, a moved file, a retired workaround), say so explicitly in your final report even if you're not the one editing the doc.
+- `CLAUDE.md` changes only when the user asks, so keep it free of facts that go stale on their own: this mod's version, jar file names, commit hashes, dependency file ids. Point at the file that holds the value instead.
 
 ## Agent workflow
 
 - Work happens on a task branch in its own worktree: one wrap-up commit, never `main`, never a push.
-- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is debug-level, which the dev run's `run/logs/latest.log` still records, and is expected exactly once; the smoke test's `Smoke test recipe ... (from justenoughfluidinteractions): 0 source state(s)` line for the fallback recipe is the same evidence at info).
+- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is debug-level, so it is in the dev run's `run/logs/debug.log` and not in `latest.log`, and is expected exactly once; the smoke test's `Smoke test recipe ... (from justenoughfluidinteractions): 0 source state(s)` line for the fallback recipe is the same evidence at info).
 
 ## Credentials
 
@@ -33,7 +36,8 @@ Never read, print, or probe that file or those values.
 
 ## Commands
 
-- Build the jar: `./gradlew build` (output `build/libs/justenoughfluidinteractions-1.0.0.jar`, includes `META-INF/jarjar/`).
+- Build the jar: `./gradlew build` (output `build/libs/justenoughfluidinteractions-<mod_version>.jar`, version from
+  `gradle.properties`, includes `META-INF/jarjar/`; jars of earlier versions stay in `build/libs` until cleaned).
 - Compile only: `./gradlew compileJava compileDevJava`.
 - Smoke test in a real client: `./gradlew runClientJeiTest`. Deletes any previous test save, creates a flat world, opens the category, writes
   `run/screenshots/jei_fluid_interactions_*.png`, exits. Takes about 30 s. Read the PNGs to verify rendering.
@@ -45,7 +49,8 @@ Never read, print, or probe that file or those values.
 
 - `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages).
 - `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
-  `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config.
+  `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config. Its compile classpath extends
+  `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
 - `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
 - `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`), registered from the main class
@@ -90,8 +95,8 @@ Never read, print, or probe that file or those values.
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
-`Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, still present in the dev run's
-`latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
+`Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
+`run/logs/debug.log`, not `latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
 debug so a large pack does not spam the production log; production users see failures only as "Unable to process"
 recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
