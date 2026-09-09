@@ -282,7 +282,7 @@ public final class InteractionProber {
             recipes.add(new FluidInteractionRecipe(
                     type, index, PENDING_ID,
                     List.copyOf(group.sources), List.copyOf(group.neighbors), FluidInteractionRecipe.NEIGHBOR_OFFSET,
-                    entry.getKey().conditions(), entry.getKey().results(), null, owner));
+                    entry.getKey().conditions(), entry.getKey().results(), null, owner, InertForms.NONE));
         }
         return new ProbedInteraction(index, owner, recipes);
     }
@@ -320,7 +320,7 @@ public final class InteractionProber {
 
     private static FluidInteractionRecipe withId(FluidInteractionRecipe recipe, ResourceLocation id) {
         return new FluidInteractionRecipe(recipe.sourceType(), recipe.index(), id, recipe.sources(), recipe.neighbors(),
-                recipe.neighborOffset(), recipe.conditions(), recipe.results(), recipe.failure(), recipe.owner());
+                recipe.neighborOffset(), recipe.conditions(), recipe.results(), recipe.failure(), recipe.owner(), recipe.inert());
     }
 
     private static @Nullable ResourceLocation resultKey(@Nullable BlockState state) {

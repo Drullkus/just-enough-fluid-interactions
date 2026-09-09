@@ -133,6 +133,8 @@ public final class RecipeMerger {
         private final FluidInteractionRecipe first;
         private final Set<FluidState> sources = new LinkedHashSet<>();
         private final Set<Placement> neighbors = new LinkedHashSet<>();
+        private final Set<FluidState> inertSources = new LinkedHashSet<>();
+        private final Set<Placement> inertNeighbors = new LinkedHashSet<>();
         private int members;
 
         Merge(FluidInteractionRecipe recipe) {
@@ -143,16 +145,22 @@ public final class RecipeMerger {
         void add(FluidInteractionRecipe recipe) {
             sources.addAll(recipe.sources());
             neighbors.addAll(recipe.neighbors());
+            inertSources.addAll(recipe.inert().sources());
+            inertNeighbors.addAll(recipe.inert().neighbors());
             members++;
         }
 
+        /** A form another member matched is not inert, so the union of the members drops it again. */
         FluidInteractionRecipe build() {
             if (members == 1) {
                 return first;
             }
+            inertSources.removeAll(sources);
+            inertNeighbors.removeAll(neighbors);
             return new FluidInteractionRecipe(first.sourceType(), first.index(), first.id(),
                     List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
-                    first.conditions(), first.results(), null, first.owner());
+                    first.conditions(), first.results(), null, first.owner(),
+                    new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)));
         }
     }
 }

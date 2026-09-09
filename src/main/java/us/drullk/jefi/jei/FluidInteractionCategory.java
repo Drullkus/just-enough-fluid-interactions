@@ -22,6 +22,7 @@ import mezz.jei.api.gui.placement.HorizontalAlignment;
 import mezz.jei.api.gui.placement.VerticalAlignment;
 import mezz.jei.api.gui.widgets.IRecipeExtrasBuilder;
 import mezz.jei.api.helpers.IGuiHelper;
+import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.category.AbstractRecipeCategory;
 import net.minecraft.ChatFormatting;
@@ -30,7 +31,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
@@ -80,12 +83,26 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
 
         IRecipeSlotBuilder source = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("source");
         recipe.sourceFluids().forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
-        source.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY)));
+        source.addRichTooltipCallback((view, tooltip) -> {
+            tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY));
+            Fluid shown = displayedFluid(view);
+            FluidState inert = shown != null ? recipe.inert().sourceOf(shown) : null;
+            if (inert != null) {
+                tooltip.add(Texts.inertSource(inert).withStyle(ChatFormatting.YELLOW));
+            }
+        });
 
         if (!recipe.neighbors().isEmpty()) {
             IRecipeSlotBuilder neighbor = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("neighbor");
             addPlacements(neighbor, recipe.neighbors());
-            neighbor.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY)));
+            neighbor.addRichTooltipCallback((view, tooltip) -> {
+                tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY));
+                Fluid shown = displayedFluid(view);
+                Placement inert = shown != null ? recipe.inert().neighborOf(shown) : null;
+                if (inert != null) {
+                    tooltip.add(Texts.inertNeighbor(inert).withStyle(ChatFormatting.YELLOW));
+                }
+            });
         }
         for (var condition : recipe.conditions().entrySet()) {
             BlockPos offset = condition.getKey();
@@ -201,6 +218,15 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
                 slot.addItemStack(item);
             }
         }
+    }
+
+    /** The still form of the fluid a slot is currently cycling to, or null when it shows an item or nothing. */
+    private static @Nullable Fluid displayedFluid(IRecipeSlotView view) {
+        ITypedIngredient<?> displayed = view.getDisplayedIngredient().orElse(null);
+        if (displayed == null || !(displayed.getIngredient() instanceof FluidStack stack)) {
+            return null;
+        }
+        return FluidInteractionRecipe.stillForm(stack.getFluid().defaultFluidState());
     }
 
     static List<Fluid> stillFluidsOf(FluidType type) {

@@ -33,6 +33,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * @param results        blocks written by the interaction, keyed by offset; normally just the source position
  * @param failure        non-null when the interaction could not be processed; the other collections are then empty
  * @param owner          mod id credited with registering the interaction, or null when none could be derived
+ * @param inert          forms the same spread probe tried at this arrangement without a result, empty for
+ *                       everything the registry probe finds
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -44,13 +46,14 @@ public record FluidInteractionRecipe(
         Map<BlockPos, Placement> conditions,
         Map<BlockPos, BlockState> results,
         @Nullable Component failure,
-        @Nullable String owner) {
+        @Nullable String owner,
+        InertForms inert) {
 
     /** The neighbor position handed to registered interactions when probing, relative to the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
 
     public static FluidInteractionRecipe failed(FluidType type, int index, ResourceLocation id, Component reason, @Nullable String owner) {
-        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner);
+        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner, InertForms.NONE);
     }
 
     public boolean isFailure() {

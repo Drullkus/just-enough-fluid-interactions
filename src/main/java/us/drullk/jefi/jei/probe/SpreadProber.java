@@ -90,7 +90,58 @@ public final class SpreadProber {
                 }
             }
         }
+        outcomes.forEach((outcome, group) -> group.inert = inert(sources, outcome.target(), group));
         return order(type, outcomes);
+    }
+
+    /**
+     * The forms one outcome was also tried with that wrote nothing: source states of the same fluid that left
+     * every one of the outcome's neighbors as it was, and the other form of a neighbor fluid that every one of
+     * the outcome's source states left as it was. Only a finished outcome names the arrangements the question is
+     * about, so these runs happen here rather than being remembered from the sweep above.
+     */
+    private InertForms inert(List<FluidState> sources, BlockPos target, Group group) {
+        List<FluidState> inertSources = new ArrayList<>();
+        for (FluidState candidate : sources) {
+            if (group.sources.contains(candidate) || !sharesFluid(candidate, group.sources)) {
+                continue;
+            }
+            if (group.neighbors.stream().allMatch(neighbor -> run(candidate, target, neighbor).isEmpty())) {
+                inertSources.add(candidate);
+            }
+        }
+        Set<Placement> inertNeighbors = new LinkedHashSet<>();
+        for (Placement neighbor : group.neighbors) {
+            Placement other = otherForm(neighbor);
+            if (other == null || group.neighbors.contains(other)) {
+                continue;
+            }
+            if (group.sources.stream().allMatch(source -> run(source, target, other).isEmpty())) {
+                inertNeighbors.add(other);
+            }
+        }
+        return new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors));
+    }
+
+    private static boolean sharesFluid(FluidState state, Set<FluidState> states) {
+        Fluid still = FluidInteractionRecipe.stillForm(state);
+        return states.stream().anyMatch(other -> FluidInteractionRecipe.stillForm(other) == still);
+    }
+
+    /** The candidate holding the same fluid as this one in its other form, or null when there is no such form. */
+    private @Nullable Placement otherForm(Placement placement) {
+        if (!placement.isFluid()) {
+            return null;
+        }
+        Fluid still = FluidInteractionRecipe.stillForm(placement.effectiveFluid());
+        for (Placement candidate : candidates) {
+            if (candidate.isFluid()
+                    && FluidInteractionRecipe.stillForm(candidate.effectiveFluid()) == still
+                    && candidate.isFlowing() != placement.isFlowing()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**
@@ -169,12 +220,40 @@ public final class SpreadProber {
                     n++;
                     variant = 0;
                 }
-                ordered.add(new FluidInteractionRecipe(type, -1, recipeId(typeKey, ownerSegment, n, variant++),
+                FluidInteractionRecipe recipe = new FluidInteractionRecipe(type, -1, recipeId(typeKey, ownerSegment, n, variant++),
                         List.copyOf(entry.getValue().sources), List.copyOf(entry.getValue().neighbors),
-                        outcome.target(), Map.of(), outcome.results(), null, owner));
+                        outcome.target(), Map.of(), outcome.results(), null, owner, entry.getValue().inert);
+                logFormDifference(recipe);
+                ordered.add(recipe);
             }
         }
         return ordered;
+    }
+
+    /**
+     * States at info level, once per recipe, that a fluid's spread produced a result in one source form and
+     * wrote nothing in the other. Mod authors have no other way to see what the probe saw, so this is not a
+     * debug line; it reports the observation and nothing beyond it.
+     */
+    private static void logFormDifference(FluidInteractionRecipe recipe) {
+        BlockState result = recipe.results().get(recipe.neighborOffset());
+        for (FluidState inert : recipe.inert().sources()) {
+            LOGGER.info("Fluid spread form difference: {} changes {} {} into {} as {}; its {} form spreads over them without changing them",
+                    BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(inert)),
+                    recipe.neighbors().stream().map(SpreadProber::key).toList(),
+                    recipe.neighborOffset().equals(BELOW_OFFSET) ? "below it" : "beside it",
+                    result != null ? BuiltInRegistries.BLOCK.getKey(result.getBlock()) : describe(recipe.results()),
+                    recipe.matchesSourceForm() ? "a source block" : "a flowing block",
+                    inert.isSource() ? "source" : "flowing");
+        }
+    }
+
+    /** The registry id behind a placement, so a form difference can be grepped for by fluid or block id. */
+    private static String key(Placement placement) {
+        if (placement.isFluid()) {
+            return String.valueOf(BuiltInRegistries.FLUID.getKey(placement.effectiveFluid().getType()));
+        }
+        return String.valueOf(BuiltInRegistries.BLOCK.getKey(placement.block().getBlock()));
     }
 
     /**
@@ -211,5 +290,6 @@ public final class SpreadProber {
     private static final class Group {
         final Set<FluidState> sources = new LinkedHashSet<>();
         final Set<Placement> neighbors = new LinkedHashSet<>();
+        InertForms inert = InertForms.NONE;
     }
 }

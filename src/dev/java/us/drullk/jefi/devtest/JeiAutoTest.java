@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
+import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.InteractionProber;
 import us.drullk.jefi.jei.probe.Placement;
@@ -43,6 +44,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -68,6 +70,7 @@ public final class JeiAutoTest {
     private static int shot;
     private static List<FluidInteractionRecipe> recipes = List.of();
     private static @Nullable FluidInteractionRecipe spreadRecipe;
+    private static @Nullable FluidInteractionRecipe formRecipe;
 
     private JeiAutoTest() {
     }
@@ -112,6 +115,7 @@ public final class JeiAutoTest {
                     checkFlowingNeighbor(recipes);
                     checkSpreadRecipe(recipes);
                     checkOwnerOrder(recipes);
+                    checkFormDifference(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -156,14 +160,28 @@ public final class JeiAutoTest {
                     if (spreadRecipe != null) {
                         grab(mc, "spread");
                     }
+                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+                    if (formRecipe != null && runtime != null) {
+                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+                        runtime.getRecipesGui().showRecipes(category, List.of(formRecipe), List.of());
+                    }
                     phase = 6;
-                    timer = 10;
+                    timer = 25;
                 }
             }
             case 6 -> {
                 if (--timer <= 0) {
-                    LOGGER.info("Smoke test finished, stopping the client");
+                    if (formRecipe != null) {
+                        grab(mc, "form");
+                    }
                     phase = 7;
+                    timer = 10;
+                }
+            }
+            case 7 -> {
+                if (--timer <= 0) {
+                    LOGGER.info("Smoke test finished, stopping the client");
+                    phase = 8;
                     mc.stop();
                 }
             }
@@ -319,6 +337,48 @@ public final class JeiAutoTest {
         return recipe.neighbors().stream()
                 .anyMatch(placement -> placement.isFlowing() == flowing
                         && FluidInteractionRecipe.stillForm(placement.effectiveFluid()) == Fluids.WATER);
+    }
+
+    /**
+     * The dev fluid hardens a lava-tagged fluid below it only as a source block, so its spread recipe has to
+     * carry the source state alone with the flowing state recorded as inert, and the line the source slot shows
+     * has to name that flowing form. Vanilla's stone comes out of both lava forms, so it records nothing inert.
+     */
+    private static void checkFormDifference(List<FluidInteractionRecipe> found) {
+        BlockState result = JeiAutoTestFluids.RESULT.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> recipe.sourceFluids().contains(JeiAutoTestFluids.sourceFluid()))
+                .filter(recipe -> result.equals(recipe.results().get(recipe.neighborOffset())))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one {} recipe from the dev fluid spreading down, found {}",
+                    BuiltInRegistries.BLOCK.getKey(result.getBlock()), matches.size());
+            return;
+        }
+        FluidInteractionRecipe recipe = matches.getFirst();
+        formRecipe = recipe;
+        if (recipe.matchesFlowingForm() || !recipe.matchesSourceForm()) {
+            LOGGER.error("Smoke test expected {} to match the source form only, source state(s) {}",
+                    recipe.id(), recipe.sources().size());
+        }
+        List<FluidState> inert = recipe.inert().sources();
+        if (inert.size() != 1 || inert.getFirst().isSource()) {
+            LOGGER.error("Smoke test expected {} to record one flowing inert source form, found {}", recipe.id(), inert.size());
+            return;
+        }
+        String line = Texts.inertSource(inert.getFirst()).getString();
+        String expected = "Flowing " + JeiAutoTestFluids.DISPLAY_NAME.getString();
+        if (!line.contains(expected)) {
+            LOGGER.error("Smoke test expected the source slot line of {} to name {}, found {}", recipe.id(), expected, line);
+        }
+        LOGGER.info("Smoke test form difference {} (from {}): {} source state(s), inert {}, neighbor alternative(s) {}, line \"{}\"",
+                recipe.id(), recipe.owner(), recipe.sources().size(),
+                inert.stream().map(state -> Texts.form(state).getString()).toList(),
+                recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList(), line);
+        if (spreadRecipe != null && !spreadRecipe.inert().isEmpty()) {
+            LOGGER.error("Smoke test expected the stone recipe {} to record no inert form, found source(s) {} neighbor(s) {}",
+                    spreadRecipe.id(), spreadRecipe.inert().sources().size(), spreadRecipe.inert().neighbors().size());
+        }
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

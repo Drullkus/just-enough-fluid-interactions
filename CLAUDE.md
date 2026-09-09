@@ -1,7 +1,9 @@
 # Just Enough Fluid Interactions
 
-A NeoForge 1.21.1 mod whose only feature is a JEI plugin that displays every `FluidInteractionRegistry` entry as a
-recipe, discovered by running the interactions in a sandbox level and rendered as 3D scenes with Gander.
+A NeoForge 1.21.1 mod whose only feature is a JEI plugin that displays fluid interactions as recipes: every
+`FluidInteractionRegistry` entry, plus the hardening rules fluids implement in their own spread code (vanilla's
+lava-over-water stone lives in `LavaFluid.spreadTo`, not the registry). Both are discovered by running them in a
+sandbox level and rendered as 3D scenes with Gander.
 
 ## Versions
 
@@ -10,7 +12,8 @@ recipe, discovered by running the interactions in a sandbox level and rendered a
 - JEI: the full jar, as two file ids in `build.gradle`. `compileOnly` is the oldest supported release, the minimum
   of the `versionRange` in `src/main/templates/META-INF/neoforge.mods.toml`; `runtimeOnly` is a current release.
   Raise the minimum only together with the compile jar.
-- Gaia Dimension `curse.maven:gaia-dimension-302529:7021516` (1.21-2.2.288), a mod that registers 11 interactions.
+- Test mods on the dev classpath, declared in `build.gradle` and never shipped: Gaia Dimension (registers
+  interactions and lava-tagged fluids), Create, Sable, Create Aeronautics. They exist to feed the smoke test.
 - Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, bundled jar-in-jar. Version in
   `gradle.properties` (`gander_version`), currently the published `0.2.32`; the jar-in-jar range is `[0.2,1.0)`.
   Nothing resolves from the local Maven repository.
@@ -50,7 +53,10 @@ Never read, print, or probe that file or those values.
 - `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages).
 - `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
   `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config. Its compile classpath extends
-  `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod.
+  `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod. `JeiAutoTestInteractions`
+  registers dev-only interactions and `JeiAutoTestFluids` a dev-only fluid (`hardening_brine`, hardens lava-tagged
+  fluids below it in source form only); a `Fluid` claims its registry holder in its constructor, so dev fluids are
+  built inside `RegisterEvent`, never statically.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
 - `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
 - `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`), registered from the main class
@@ -70,24 +76,43 @@ Never read, print, or probe that file or those values.
   (probing keeps level 7), the default camera angle is `SceneRenderer.DEFAULT_YAW`/`DEFAULT_PITCH`, and a custom
   rotate cursor would plug into `SceneCursor.handle()`.
 - Interaction owners come from `InteractionOwners`: the lambda's declaring class, then the namespace of captured
-  registry objects. A third-party mod using `InteractionInformation`'s convenience constructors with only vanilla
+  registry objects; a spread-discovered rule is owned by its fluid (`ofFluid`: the fluid's class, then its registry
+  namespace). A third-party mod using `InteractionInformation`'s convenience constructors with only vanilla
   blocks still reads as `neoforge`; treat attribution as approximate.
+- `SpreadProber` is the second discovery tier: it ticks each fluid type's still and flowing source states at the
+  origin with one candidate below or beside and keeps writes that are neither air nor a state of the source fluid.
+  Below is the canonical target: the registry's own javadoc tests every direction except down and defers
+  down-interaction changes to `FlowingFluid#spreadTo` (NeoForge issue 1880 closed the stone request as intended).
+  Its fixtures (a bedrock floor for sideways targets, a feeding source above a flowing source) never enter a recipe.
+  It also records, per recipe, the source and neighbor forms it tried at the same arrangement that wrote nothing
+  (`FluidInteractionRecipe.inert`, always `InertForms.NONE` for registry recipes, where each form has its own
+  recipe).
+- Text about another mod's behavior states the observation only, never a judgment: no "bug", "incomplete",
+  "missing", "should", "likely". Only that mod's developer knows intent. The inert-form lines ("%s spreads without
+  interacting") are yellow so they stand out from the gray descriptive lines, and the matching
+  `Fluid spread form difference` log line is info, not debug, because it is the signal a mod author would grep for.
 - JEI slots accept only still fluids; map flowing states with `FluidInteractionRecipe.stillForm`. Neighbor
   placements carry the fluid form the probe verified (`Placement.isFlowing`, described as "Flowing <fluid>");
-  when a recipe holds both forms of one fluid the scene draws the flowing one (`SceneArrangement.neighborIndex`).
+  when a recipe holds both forms of one fluid the scene draws the flowing one beside the source
+  (`SceneArrangement.neighborIndex`); a recipe whose neighbor is above or below (`neighborOffset`) is drawn as two
+  still blocks with no feeding sources, because nothing flows upward.
 - JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
 - A fresh `run/` directory (every new worktree) has no `options.txt`, so the client opens the accessibility
   onboarding screen before the title screen. `JeiAutoTest` dismisses it itself; if a smoke test ever sits idle with no
   `Smoke test` log line, that dismissal is what to check first. The test deletes its save before creating it, so
   re-runs never load an existing world (loading one would stop on the experimental-world backup prompt).
-- Recipe ids are `justenoughfluidinteractions:<type namespace>/<type path>/<owner>/<n>/<variant>` and must stay
-  unique and stable across launches; JEI uses them for bookmarks. Probe order, which is also JEI's display order,
-  ranks fluid types `minecraft`, `neoforge`, then other namespaces alphabetically, then path
-  (`InteractionProber.LOCATION_ORDER`, never `ResourceLocation`'s path-first natural order); within a type it groups
-  interactions by owner in the same ranking and numbers them (`n`) with successes first, then the result block's
-  key, then registration index. Registration index alone is unstable because NeoForge dispatches mod setup in
-  parallel. `RecipeMerger` keeps the first member's id in that order and includes the owner in its merge keys so
-  patterns from different mods stay separate.
+- Recipe ids are `justenoughfluidinteractions:<type namespace>/<type path>/<owner>/<n>/<variant>` for registry
+  interactions and `justenoughfluidinteractions:spread/<type namespace>/<type path>/<owner>/<n>/<variant>` for
+  spread-discovered ones, and must stay unique and stable across launches; JEI uses them for bookmarks. Fluid types
+  rank `minecraft`, `neoforge`, then other namespaces alphabetically, then path (`InteractionProber.LOCATION_ORDER`,
+  never `ResourceLocation`'s path-first natural order). Within a type, registry interactions are grouped by owner in
+  the same ranking and numbered (`n`) with successes first, then the result block's key, then registration index;
+  spread recipes number `n` by target position (below, then beside) and `variant` by outcome. Registration index
+  alone is unstable because NeoForge dispatches mod setup in parallel. Display order is the type order, then owner
+  rank across both probes, with registry recipes before spread recipes inside one owner; ids are assigned before
+  that regrouping and never depend on it. `RecipeMerger` keeps the first member's id in that order and includes the
+  owner and the neighbor offset in its merge keys so patterns from different mods, or at different positions, stay
+  separate.
 - Never call `FlowingFluid.getFlowing(level, falling)` on modded fluids: some register flowing states without the
   `LEVEL` or `FALLING` property and `setValue` throws. Build the state with `defaultFluidState().trySetValue(...)`
   as `InteractionProber` and `SceneArrangement` do.
@@ -95,13 +120,19 @@ Never read, print, or probe that file or those values.
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
-`Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
+`Probed fluid spread of N fluid type(s)`, `Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
 `run/logs/debug.log`, not `latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
 debug so a large pack does not spam the production log; production users see failures only as "Unable to process"
 recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
 duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
 dev-only mergeable interactions, and one `Smoke test flowing neighbor ...` line proving the cobblestone recipe
-carries a flowing water neighbor (an `ERROR` from either is a regression), and one `Smoke test recipe ids <sha-256>`
-line; that hash must not change between runs of the same checkout. Crop and enlarge screenshots with `sips`
-when a detail matters.
+carries a flowing water neighbor, one `Smoke test spread recipe ...` line proving lava over water yields stone with
+both water forms as alternatives, one `Smoke test order ...` line proving that stone recipe precedes every
+third-party lava recipe, one `Smoke test form difference ...` line proving the dev fluid's recipe carries the still
+form with the flowing form inert and names it in the tooltip text (an `ERROR` from any of these is a regression),
+and one `Smoke test recipe ids <sha-256>` line; that hash must not change between runs of the same checkout.
+`SpreadProber` logs exactly one info `Fluid spread form difference: ...` line in the dev run, for the dev fluid. The
+stone and dev-fluid recipes get their own screenshots, `jei_fluid_interactions_spread.png` and
+`jei_fluid_interactions_form.png`; the first should show lava directly over water then over stone. Crop and
+enlarge screenshots with `sips` or PIL when a detail matters.
