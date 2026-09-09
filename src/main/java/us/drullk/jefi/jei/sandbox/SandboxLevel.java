@@ -9,6 +9,7 @@ import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
 
+import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.Placement;
 
 import dev.compactmods.gander.level.VirtualLevel;
@@ -22,8 +23,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.ticks.TickPriority;
 import net.neoforged.neoforge.client.model.data.ModelData;
 import net.neoforged.neoforge.client.model.data.ModelDataManager;
 
@@ -161,6 +164,33 @@ public final class SandboxLevel extends VirtualLevel {
     @Override
     public boolean setBlockAndUpdate(BlockPos pos, BlockState state) {
         return setBlock(pos, state, Block.UPDATE_ALL);
+    }
+
+    /**
+     * Nothing here is ever ticked a second time, and a fluid ticked by the spread probe schedules its own next
+     * tick, so scheduling has to end at the sandbox rather than reach Gander's tick lists.
+     */
+    @Override
+    public void scheduleTick(BlockPos pos, Block block, int delay) {
+    }
+
+    @Override
+    public void scheduleTick(BlockPos pos, Block block, int delay, TickPriority priority) {
+    }
+
+    @Override
+    public void scheduleTick(BlockPos pos, Fluid fluid, int delay) {
+    }
+
+    @Override
+    public void scheduleTick(BlockPos pos, Fluid fluid, int delay, TickPriority priority) {
+    }
+
+    /** There is no entity system here, so drops from a block a fluid destroys go nowhere. */
+    @Override
+    public boolean addFreshEntity(Entity entity) {
+        JustEnoughFluidInteractions.LOGGER.debug("Denied attempted entity spawn {}", entity.getType());
+        return false;
     }
 
     @Override

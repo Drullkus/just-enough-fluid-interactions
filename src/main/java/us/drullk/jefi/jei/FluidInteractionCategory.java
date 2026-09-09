@@ -85,7 +85,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         if (!recipe.neighbors().isEmpty()) {
             IRecipeSlotBuilder neighbor = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("neighbor");
             addPlacements(neighbor, recipe.neighbors());
-            neighbor.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(FluidInteractionRecipe.NEIGHBOR_OFFSET).withStyle(ChatFormatting.GRAY)));
+            neighbor.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY)));
         }
         for (var condition : recipe.conditions().entrySet()) {
             BlockPos offset = condition.getKey();

@@ -21,15 +21,18 @@ import net.neoforged.neoforge.fluids.FluidType;
  * probe (source states, what must surround the source, and what gets written) or, when {@link #failure} is set,
  * records that the interaction exists but could not be exercised.
  *
- * @param sourceType the fluid type the interaction is registered against
- * @param index      the interaction's index within that type's registration list
- * @param id         a stable unique id for bookmarks and JEI's recipe lookups
- * @param sources    source fluid states that produced this exact outcome (source and/or flowing forms)
- * @param neighbors  alternatives for the tested neighbor position; any one of them triggers the interaction
- * @param conditions additional positions that must hold a specific block or fluid (found by multi-position search)
- * @param results    blocks written by the interaction, keyed by offset; normally just the source position
- * @param failure    non-null when the interaction could not be processed; the other collections are then empty
- * @param owner      mod id credited with registering the interaction, or null when none could be derived
+ * @param sourceType     the fluid type the interaction is registered against
+ * @param index          the interaction's index within that type's registration list, or -1 when the recipe was
+ *                       discovered by spread simulation rather than from the registry
+ * @param id             a stable unique id for bookmarks and JEI's recipe lookups
+ * @param sources        source fluid states that produced this exact outcome (source and/or flowing forms)
+ * @param neighbors      alternatives for the tested neighbor position; any one of them triggers the interaction
+ * @param neighborOffset where the neighbor sits relative to the source, {@link #NEIGHBOR_OFFSET} for everything
+ *                       the registry probe finds
+ * @param conditions     additional positions that must hold a specific block or fluid (found by multi-position search)
+ * @param results        blocks written by the interaction, keyed by offset; normally just the source position
+ * @param failure        non-null when the interaction could not be processed; the other collections are then empty
+ * @param owner          mod id credited with registering the interaction, or null when none could be derived
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -37,16 +40,17 @@ public record FluidInteractionRecipe(
         ResourceLocation id,
         List<FluidState> sources,
         List<Placement> neighbors,
+        BlockPos neighborOffset,
         Map<BlockPos, Placement> conditions,
         Map<BlockPos, BlockState> results,
         @Nullable Component failure,
         @Nullable String owner) {
 
-    /** The neighbor position used when probing, relative to the source. */
+    /** The neighbor position handed to registered interactions when probing, relative to the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
 
     public static FluidInteractionRecipe failed(FluidType type, int index, ResourceLocation id, Component reason, @Nullable String owner) {
-        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), Map.of(), Map.of(), reason, owner);
+        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner);
     }
 
     public boolean isFailure() {

@@ -45,8 +45,9 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  *     records which positions a predicate reads; a candidate is kept at a position when it makes the predicate
  *     read somewhere new, which is what short-circuit evaluation reveals once an earlier clause passes.</li>
  * </ol>
- * Anything that never fires, throws, or writes no block becomes a failure recipe. Recipes describing the same
- * pattern are collapsed by {@link RecipeMerger} once every interaction has been probed.
+ * Anything that never fires, throws, or writes no block becomes a failure recipe. {@link SpreadProber} then adds
+ * what the fluids do on their own, and recipes describing the same pattern are collapsed by {@link RecipeMerger}
+ * once everything has been probed.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -75,7 +76,7 @@ public final class InteractionProber {
             Comparator.comparing(ResourceLocation::getNamespace, NAMESPACE_ORDER).thenComparing(ResourceLocation::getPath);
 
     /** {@link #NAMESPACE_ORDER} applied to an owner mod id; a null (unattributed) owner sorts last. */
-    private static final Comparator<String> OWNER_ORDER = Comparator.nullsLast(NAMESPACE_ORDER);
+    static final Comparator<String> OWNER_ORDER = Comparator.nullsLast(NAMESPACE_ORDER);
 
     private static final Comparator<ProbedInteraction> WITHIN_OWNER_ORDER = Comparator
             .<ProbedInteraction>comparingInt(interaction -> interaction.isFailure() ? 1 : 0)
@@ -125,27 +126,77 @@ public final class InteractionProber {
      * {@link #LOCATION_ORDER}, null result last), then by registration index. That order is what JEI displays and
      * what recipe ids encode, so it stays the same across launches even though NeoForge dispatches mod setup — and
      * therefore fluid interaction registration — in parallel.
+     *
+     * <p>What {@link SpreadProber} finds for a type follows that type's registered interactions, so adding the
+     * spread tier leaves the existing display order and every existing recipe id alone.
      */
     public List<FluidInteractionRecipe> probeAll() {
-        List<Map.Entry<FluidType, List<InteractionInformation>>> entries = new ArrayList<>(RegisteredInteractions.get().entrySet());
-        entries.sort(Comparator.comparing(e -> keyOf(e.getKey()), LOCATION_ORDER));
+        Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
+        List<FluidType> types = orderedTypes(registered.keySet());
 
-        List<FluidInteractionRecipe> recipes = new ArrayList<>();
         long start = System.nanoTime();
+        Map<FluidType, List<FluidInteractionRecipe>> fromRegistry = new LinkedHashMap<>();
         int interactionCount = 0;
-        for (var entry : entries) {
-            List<InteractionInformation> interactions = List.copyOf(entry.getValue());
+        for (FluidType type : types) {
+            List<InteractionInformation> interactions = List.copyOf(registered.getOrDefault(type, List.of()));
+            if (interactions.isEmpty()) {
+                continue;
+            }
             interactionCount += interactions.size();
             List<ProbedInteraction> probed = new ArrayList<>(interactions.size());
             for (int i = 0; i < interactions.size(); i++) {
-                probed.add(probe(entry.getKey(), i, interactions.get(i)));
+                probed.add(probe(type, i, interactions.get(i)));
             }
-            recipes.addAll(order(keyOf(entry.getKey()), probed));
+            fromRegistry.put(type, order(keyOf(type), probed));
+        }
+        long registryNanos = System.nanoTime() - start;
+
+        long spreadStart = System.nanoTime();
+        SpreadProber spreadProber = new SpreadProber(level, fluidCandidates, blockCandidates);
+        Set<Object> known = new LinkedHashSet<>();
+        fromRegistry.values().forEach(list -> list.forEach(recipe -> known.add(patternKey(recipe))));
+        Map<FluidType, List<FluidInteractionRecipe>> fromSpread = new LinkedHashMap<>();
+        int spreadCount = 0;
+        for (FluidType type : types) {
+            List<FluidInteractionRecipe> spread = new ArrayList<>(spreadProber.probe(type, sourceStates(type)));
+            spread.removeIf(recipe -> known.contains(patternKey(recipe)));
+            if (!spread.isEmpty()) {
+                fromSpread.put(type, spread);
+                spreadCount += spread.size();
+            }
+        }
+        long spreadNanos = System.nanoTime() - spreadStart;
+
+        List<FluidInteractionRecipe> recipes = new ArrayList<>();
+        for (FluidType type : types) {
+            recipes.addAll(fromRegistry.getOrDefault(type, List.of()));
+            recipes.addAll(fromSpread.getOrDefault(type, List.of()));
         }
         List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
+        LOGGER.info("Probed fluid spread of {} fluid type(s) into {} JEI recipe(s) in {} ms",
+                types.size(), spreadCount, spreadNanos / 1_000_000);
         LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
-                interactionCount, merged.size(), (System.nanoTime() - start) / 1_000_000);
+                interactionCount, merged.size(), (registryNanos + spreadNanos) / 1_000_000);
         return merged;
+    }
+
+    /** Every fluid type that either has registered interactions or has a fluid to tick, in {@link #LOCATION_ORDER}. */
+    private static List<FluidType> orderedTypes(Set<FluidType> registered) {
+        Set<FluidType> types = new LinkedHashSet<>(registered);
+        for (Fluid fluid : BuiltInRegistries.FLUID) {
+            if (fluid != Fluids.EMPTY && fluid.defaultFluidState().isSource()) {
+                types.add(fluid.getFluidType());
+            }
+        }
+        List<FluidType> ordered = new ArrayList<>(types);
+        ordered.sort(Comparator.comparing(InteractionProber::keyOf, LOCATION_ORDER));
+        return ordered;
+    }
+
+    /** What a recipe shows, ignoring who owns it, so a spread probe cannot repeat a registry-derived recipe. */
+    private static Object patternKey(FluidInteractionRecipe recipe) {
+        return List.of(Set.copyOf(recipe.sources()), Set.copyOf(recipe.neighbors()), recipe.neighborOffset(),
+                recipe.conditions(), recipe.results());
     }
 
     private ProbedInteraction probe(FluidType type, int index, InteractionInformation interaction) {
@@ -205,7 +256,7 @@ public final class InteractionProber {
             Group group = entry.getValue();
             recipes.add(new FluidInteractionRecipe(
                     type, index, PENDING_ID,
-                    List.copyOf(group.sources), List.copyOf(group.neighbors),
+                    List.copyOf(group.sources), List.copyOf(group.neighbors), FluidInteractionRecipe.NEIGHBOR_OFFSET,
                     entry.getKey().conditions(), entry.getKey().results(), null, owner));
         }
         return new ProbedInteraction(index, owner, recipes);
@@ -244,7 +295,7 @@ public final class InteractionProber {
 
     private static FluidInteractionRecipe withId(FluidInteractionRecipe recipe, ResourceLocation id) {
         return new FluidInteractionRecipe(recipe.sourceType(), recipe.index(), id, recipe.sources(), recipe.neighbors(),
-                recipe.conditions(), recipe.results(), recipe.failure(), recipe.owner());
+                recipe.neighborOffset(), recipe.conditions(), recipe.results(), recipe.failure(), recipe.owner());
     }
 
     private static @Nullable ResourceLocation resultKey(@Nullable BlockState state) {
@@ -255,7 +306,7 @@ public final class InteractionProber {
      * Mod ids are already restricted to characters legal in a {@link ResourceLocation} path, but anything else is
      * turned into {@code _} so a hostile or unexpected owner id can never split the id into extra path segments.
      */
-    private static String ownerSegment(@Nullable String owner) {
+    static String ownerSegment(@Nullable String owner) {
         String raw = owner != null ? owner : "unknown";
         StringBuilder sanitized = new StringBuilder(raw.length());
         for (int i = 0; i < raw.length(); i++) {
@@ -355,7 +406,7 @@ public final class InteractionProber {
     }
 
     /** Still fluids of the type, each in source form and, when flowing exists, a full-height flowing form. */
-    private static List<FluidState> sourceStates(FluidType type) {
+    static List<FluidState> sourceStates(FluidType type) {
         List<FluidState> states = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
             if (fluid.getFluidType() != type || fluid == Fluids.EMPTY) {

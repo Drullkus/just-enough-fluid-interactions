@@ -12,12 +12,14 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
+import us.drullk.jefi.jei.probe.SpreadProber;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -62,6 +64,7 @@ public final class JeiAutoTest {
     private static int timer;
     private static int shot;
     private static List<FluidInteractionRecipe> recipes = List.of();
+    private static @Nullable FluidInteractionRecipe spreadRecipe;
 
     private JeiAutoTest() {
     }
@@ -104,6 +107,7 @@ public final class JeiAutoTest {
                     checkAlternatives(recipes);
                     checkMerging(recipes);
                     checkFlowingNeighbor(recipes);
+                    checkSpreadRecipe(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -134,8 +138,28 @@ public final class JeiAutoTest {
             }
             case 4 -> {
                 if (--timer <= 0) {
-                    LOGGER.info("Smoke test finished, stopping the client");
+                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+                    if (spreadRecipe != null && runtime != null) {
+                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+                        runtime.getRecipesGui().showRecipes(category, List.of(spreadRecipe), List.of());
+                    }
                     phase = 5;
+                    timer = 25;
+                }
+            }
+            case 5 -> {
+                if (--timer <= 0) {
+                    if (spreadRecipe != null) {
+                        grab(mc, "spread");
+                    }
+                    phase = 6;
+                    timer = 10;
+                }
+            }
+            case 6 -> {
+                if (--timer <= 0) {
+                    LOGGER.info("Smoke test finished, stopping the client");
+                    phase = 7;
                     mc.stop();
                 }
             }
@@ -223,6 +247,44 @@ public final class JeiAutoTest {
         LOGGER.info("Smoke test flowing neighbor {} (from {}): {} of neighbor alternative(s) {}",
                 cobblestone.id(), cobblestone.owner(), flowing.describe().getString(),
                 cobblestone.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+    }
+
+    /**
+     * Vanilla's stone comes out of lava's own spread code rather than the interaction registry, so it exists only
+     * when the spread probe ran: lava with water directly below it and both water forms cycling in one slot.
+     */
+    private static void checkSpreadRecipe(List<FluidInteractionRecipe> found) {
+        BlockState stone = Blocks.STONE.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> recipe.neighborOffset().equals(SpreadProber.BELOW_OFFSET))
+                .filter(recipe -> stone.equals(recipe.results().get(SpreadProber.BELOW_OFFSET)))
+                .filter(recipe -> recipe.sourceFluids().contains(Fluids.LAVA))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one stone recipe from lava spreading down onto water, found {}", matches.size());
+            return;
+        }
+        FluidInteractionRecipe stoneRecipe = matches.getFirst();
+        spreadRecipe = stoneRecipe;
+        if (!stoneRecipe.id().getPath().startsWith("spread/")) {
+            LOGGER.error("Smoke test expected the stone recipe to carry a spread id, found {}", stoneRecipe.id());
+        }
+        boolean still = waterNeighbor(stoneRecipe, false);
+        boolean flowing = waterNeighbor(stoneRecipe, true);
+        if (!still || !flowing) {
+            LOGGER.error("Smoke test expected both water forms as alternatives in {}, found still {} flowing {}",
+                    stoneRecipe.id(), still, flowing);
+        }
+        LOGGER.info("Smoke test spread recipe {} (from {}): {} source state(s), {} at {}, neighbor alternative(s) {}",
+                stoneRecipe.id(), stoneRecipe.owner(), stoneRecipe.sources().size(),
+                BuiltInRegistries.BLOCK.getKey(stone.getBlock()), SpreadProber.BELOW_OFFSET.toShortString(),
+                stoneRecipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+    }
+
+    private static boolean waterNeighbor(FluidInteractionRecipe recipe, boolean flowing) {
+        return recipe.neighbors().stream()
+                .anyMatch(placement -> placement.isFlowing() == flowing
+                        && FluidInteractionRecipe.stillForm(placement.effectiveFluid()) == Fluids.WATER);
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

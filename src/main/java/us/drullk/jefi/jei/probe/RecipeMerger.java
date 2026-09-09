@@ -25,10 +25,11 @@ import net.neoforged.neoforge.fluids.FluidType;
  * recipes instead of hundreds.
  *
  * <p>Two passes run over the recipe list in probe order. The first merges recipes of one source type whose
- * conditions, results, source forms and owner match, unioning their neighbor alternatives; the second merges
- * recipes of any source type whose neighbor alternatives, conditions, results, source forms and owner match,
- * unioning their source states. Neighbor alternatives compare by block state and still fluid plus the forms each
- * was matched in, so the exact flowing state a probe recorded never decides a merge. Failure recipes never merge.
+ * neighbor position, conditions, results, source forms and owner match, unioning their neighbor alternatives; the
+ * second merges recipes of any source type whose neighbor alternatives, neighbor position, conditions, results,
+ * source forms and owner match, unioning their source states. Neighbor alternatives compare by block state and
+ * still fluid plus the forms each was matched in, so the exact flowing state a probe recorded never decides a
+ * merge. Failure recipes never merge.
  *
  * <p>A merged recipe keeps the id, source type and index of its first member in probe order. Probe order ranks
  * the source fluid type by namespace ({@code minecraft}, then {@code neoforge}, then everything else
@@ -80,11 +81,11 @@ public final class RecipeMerger {
     }
 
     private static Object withinType(FluidInteractionRecipe recipe) {
-        return new WithinType(recipe.sourceType(), recipe.owner(), recipe.conditions(), recipe.results(), forms(recipe));
+        return new WithinType(recipe.sourceType(), recipe.owner(), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
     }
 
     private static Object acrossTypes(FluidInteractionRecipe recipe) {
-        return new AcrossTypes(neighborForms(recipe), recipe.owner(), recipe.conditions(), recipe.results(), forms(recipe));
+        return new AcrossTypes(neighborForms(recipe), recipe.owner(), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
     }
 
     /** Which forms the source was matched in, as a bit mask, so a still-only pattern never merges with a flowing one. */
@@ -115,12 +116,12 @@ public final class RecipeMerger {
         return Placement.ofFluid(FluidInteractionRecipe.stillForm(placement.effectiveFluid()).defaultFluidState());
     }
 
-    private record WithinType(FluidType sourceType, @Nullable String owner, Map<BlockPos, Placement> conditions,
-                              Map<BlockPos, BlockState> results, int forms) {
+    private record WithinType(FluidType sourceType, @Nullable String owner, BlockPos neighborOffset,
+                              Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) {
     }
 
-    private record AcrossTypes(Set<NeighborForms> neighbors, @Nullable String owner, Map<BlockPos, Placement> conditions,
-                               Map<BlockPos, BlockState> results, int forms) {
+    private record AcrossTypes(Set<NeighborForms> neighbors, @Nullable String owner, BlockPos neighborOffset,
+                               Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) {
     }
 
     /** One neighbor alternative in its still form, with the forms it was matched in as a bit mask. */
@@ -150,7 +151,7 @@ public final class RecipeMerger {
                 return first;
             }
             return new FluidInteractionRecipe(first.sourceType(), first.index(), first.id(),
-                    List.copyOf(sources), List.copyOf(neighbors),
+                    List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
                     first.conditions(), first.results(), null, first.owner());
         }
     }

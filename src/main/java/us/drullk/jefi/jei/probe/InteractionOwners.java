@@ -75,6 +75,22 @@ public final class InteractionOwners {
         return evidence.classes.isEmpty() ? null : evidence.classes.iterator().next();
     }
 
+    /**
+     * The mod credited with a fluid's own behaviour, for rules that live in its class rather than in the
+     * interaction registry: the class evidence a lambda would give, then the fluid's registry namespace.
+     */
+    public static @Nullable String ofFluid(Fluid fluid) {
+        String byClass = modOf(fluid.getClass());
+        if (byClass != null && isThirdParty(byClass)) {
+            return byClass;
+        }
+        String namespace = namespaceOfKey(BuiltInRegistries.FLUID.getKey(fluid));
+        if (namespace != null && isThirdParty(namespace)) {
+            return namespace;
+        }
+        return byClass != null ? byClass : namespace;
+    }
+
     public static String describe(@Nullable String owner) {
         return owner != null ? owner : "unknown";
     }
