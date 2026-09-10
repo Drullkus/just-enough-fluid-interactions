@@ -167,6 +167,8 @@ public final class InteractionProber {
             }
         }
         long spreadNanos = System.nanoTime() - spreadStart;
+        LOGGER.debug("Skipped the fluid spread of {} of {} fluid type(s) that inherit all of their spread code",
+                spreadProber.skippedTypes(), types.size());
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>();
         for (FluidType type : types) {

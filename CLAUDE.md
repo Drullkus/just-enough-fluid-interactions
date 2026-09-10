@@ -59,9 +59,9 @@ Never read, print, or probe that file or those values.
   built inside `RegisterEvent`, never statically.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
 - `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
-- `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`), registered from the main class
-  constructor; `FluidInteractionsJeiPlugin.filter` applies it after probing. File
-  `config/justenoughfluidinteractions-client.toml`.
+- `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`, `forceSpreadProbe`), registered
+  from the main class constructor; `FluidInteractionsJeiPlugin.filter` applies the first two after probing,
+  `SpreadProber` reads the third. File `config/justenoughfluidinteractions-client.toml`.
 
 ## Conventions and gotchas
 
@@ -81,6 +81,12 @@ Never read, print, or probe that file or those values.
   blocks still reads as `neoforge`; treat attribution as approximate.
 - `SpreadProber` is the second discovery tier: it ticks each fluid type's still and flowing source states at the
   origin with one candidate below or beside and keeps writes that are neither air nor a state of the source fluid.
+  Only fluids whose own classes, below `FlowingFluid` and NeoForge's `BaseFlowingFluid`, declare one of `tick`,
+  `spread`, `spreadTo`, `canSpreadTo`, `getNewLiquid`, `beforeDestroyingBlock` are ticked (vanilla's always are,
+  `beforeDestroyingBlock` being abstract in `FlowingFluid`); the rest can only place themselves. A rule added from
+  outside a fluid's classes, such as a mixin into `FlowingFluid`, needs the fluid listed in `forceSpreadProbe`.
+  Fluids declaring none of `tick`, `spread`, `canSpreadTo` are offered only the blocks vanilla's gate admits
+  (`LiquidBlockContainer` or `!blocksMotion()`); every fluid candidate is always offered.
   Below is the canonical target: the registry's own javadoc tests every direction except down and defers
   down-interaction changes to `FlowingFluid#spreadTo` (NeoForge issue 1880 closed the stone request as intended).
   Its fixtures (a bedrock floor for sideways targets, a feeding source above a flowing source) never enter a recipe.
@@ -120,7 +126,8 @@ Never read, print, or probe that file or those values.
 ## Verifying changes
 
 Compile, then run the smoke test and read the screenshots. Check the log for `Probed N fluid interaction(s)`,
-`Probed fluid spread of N fluid type(s)`, `Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
+`Probed fluid spread of N fluid type(s)` (`debug.log` adds one `Probed fluid spread of <type> ...` line per ticked
+type and one `Skipped the fluid spread of N of M fluid type(s)` line), `Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
 `run/logs/debug.log`, not `latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
 debug so a large pack does not spam the production log; production users see failures only as "Unable to process"
 recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one

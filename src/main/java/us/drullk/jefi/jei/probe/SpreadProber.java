@@ -1,7 +1,10 @@
 package us.drullk.jefi.jei.probe;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -11,6 +14,7 @@ import java.util.Set;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.Config;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.sandbox.SandboxLevel;
 import com.mojang.logging.LogUtils;
@@ -19,6 +23,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlockContainer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
@@ -37,6 +42,13 @@ import net.neoforged.neoforge.fluids.FluidType;
  * javadoc states that it tests every direction except down and that any fluid causing a change in the down
  * interaction must handle it in {@code FlowingFluid#spreadTo}. NeoForge closed the request to move vanilla's
  * stone into the registry (issue 1880) as intended behavior.
+ *
+ * <p>Only a fluid that declares spread code of its own below {@code FlowingFluid} and NeoForge's
+ * {@code BaseFlowingFluid} is ticked: what those two classes do with a spreading fluid is place it, and placing
+ * the fluid is never a result. Vanilla's fluids qualify by implementing {@code beforeDestroyingBlock} themselves,
+ * as does every fluid built on {@code FlowingFluid} directly, and a mixin into one of those classes shows up as a
+ * declaration too. A mixin into {@code FlowingFluid} itself does not, which is what {@code forceSpreadProbe} is
+ * for.
  *
  * <p>The source fluid sits at {@link InteractionProber#ORIGIN} and one candidate at a time sits at a target
  * position — directly below the source, or beside it at {@link FluidInteractionRecipe#NEIGHBOR_OFFSET}. Ticking
@@ -58,14 +70,65 @@ public final class SpreadProber {
      */
     private static final BlockState FLOOR = Blocks.BEDROCK.defaultBlockState();
 
+    /** The methods a fluid has to declare before it can write anything but its own states while it spreads. */
+    private static final Set<String> SPREAD_METHODS =
+            Set.of("tick", "spread", "spreadTo", "canSpreadTo", "getNewLiquid", "beforeDestroyingBlock");
+
+    /**
+     * The subset of {@link #SPREAD_METHODS} that decides where a fluid may go at all. A fluid declaring none of
+     * them reaches only what vanilla's gate lets it reach, so it is offered just the blocks that gate accepts.
+     */
+    private static final Set<String> REACH_METHODS = Set.of("tick", "spread", "canSpreadTo");
+
+    /**
+     * Where the class walk stops: these declare the spread behaviour a fluid inherits, which is the behaviour the
+     * walk asks whether the fluid departs from.
+     */
+    private static final Set<String> BASE_FLUIDS = Set.of(
+            "net.minecraft.world.level.material.Fluid", "net.minecraft.world.level.material.FlowingFluid");
+    private static final String NEOFORGE_BASE_FLUID = "net.neoforged.neoforge.fluids.BaseFlowingFluid";
+
     private final SandboxLevel level;
-    private final List<Placement> candidates;
+    private final List<Placement> fluidCandidates;
+    /** Every fluid, plus the blocks vanilla's spread gate lets a fluid enter. */
+    private final List<Placement> reachableCandidates;
+    /** Every fluid and every block, for fluids that decide for themselves where they may spread. */
+    private final List<Placement> allCandidates;
+    private final Set<String> forced;
+    private final Map<Class<?>, Set<String>> declaredMethods = new HashMap<>();
+    private int runs;
+    private int skippedTypes;
 
     public SpreadProber(SandboxLevel level, List<Placement> fluidCandidates, List<Placement> blockCandidates) {
         this.level = level;
-        this.candidates = new ArrayList<>(fluidCandidates.size() + blockCandidates.size());
-        this.candidates.addAll(fluidCandidates);
-        this.candidates.addAll(blockCandidates);
+        this.fluidCandidates = List.copyOf(fluidCandidates);
+        List<Placement> reachableBlocks = blockCandidates.stream().filter(SpreadProber::canHoldFluid).toList();
+        this.reachableCandidates = concat(fluidCandidates, reachableBlocks);
+        this.allCandidates = concat(fluidCandidates, blockCandidates);
+        this.forced = Set.copyOf(Config.FORCE_SPREAD_PROBE.get());
+        LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
+                fluidCandidates.size(), reachableBlocks.size(), blockCandidates.size());
+    }
+
+    private static List<Placement> concat(List<Placement> fluids, List<Placement> blocks) {
+        List<Placement> all = new ArrayList<>(fluids.size() + blocks.size());
+        all.addAll(fluids);
+        all.addAll(blocks);
+        return List.copyOf(all);
+    }
+
+    /**
+     * Whether vanilla's spread gate would let a fluid into this state: it holds fluid itself, or it does not block
+     * movement, which is what {@code FlowingFluid.canSpreadTo} asks of every block a fluid enters.
+     */
+    private static boolean canHoldFluid(Placement placement) {
+        BlockState state = placement.block();
+        return state.getBlock() instanceof LiquidBlockContainer || !state.blocksMotion();
+    }
+
+    /** How many fluid types were left unticked because no fluid of theirs runs spread code of its own. */
+    public int skippedTypes() {
+        return skippedTypes;
     }
 
     /**
@@ -75,11 +138,21 @@ public final class SpreadProber {
      * nothing yields nothing; there are no failure recipes here.
      */
     public List<FluidInteractionRecipe> probe(FluidType type, List<FluidState> sources) {
+        List<FluidState> probed = probable(sources);
+        if (probed.isEmpty()) {
+            skippedTypes++;
+            return List.of();
+        }
+        Set<Fluid> unrestricted = unrestricted(probed);
+        long start = System.nanoTime();
+        int before = runs;
+
         Map<Outcome, Group> outcomes = new LinkedHashMap<>();
         for (BlockPos target : TARGET_OFFSETS) {
-            for (FluidState source : sources) {
-                String owner = InteractionOwners.ofFluid(FluidInteractionRecipe.stillForm(source));
-                for (Placement candidate : candidates) {
+            for (FluidState source : probed) {
+                Fluid still = FluidInteractionRecipe.stillForm(source);
+                String owner = InteractionOwners.ofFluid(still);
+                for (Placement candidate : unrestricted.contains(still) ? allCandidates : reachableCandidates) {
                     Map<BlockPos, BlockState> results = run(source, target, candidate);
                     if (results.isEmpty()) {
                         continue;
@@ -90,8 +163,71 @@ public final class SpreadProber {
                 }
             }
         }
-        outcomes.forEach((outcome, group) -> group.inert = inert(sources, outcome.target(), group));
+        outcomes.forEach((outcome, group) -> group.inert = inert(probed, outcome.target(), group));
+        LOGGER.debug("Probed fluid spread of {} in {} ms over {} candidate run(s) of {} source state(s)",
+                InteractionProber.keyOf(type), (System.nanoTime() - start) / 1_000_000, runs - before, probed.size());
         return order(type, outcomes);
+    }
+
+    /**
+     * The source states worth ticking. Both forms of a fluid stand or fall together, so an outcome one form
+     * produces can still record the other as inert.
+     */
+    private List<FluidState> probable(List<FluidState> sources) {
+        Set<Fluid> probable = new LinkedHashSet<>();
+        for (FluidState state : sources) {
+            if (runsOwnCode(state.getType(), SPREAD_METHODS)) {
+                probable.add(FluidInteractionRecipe.stillForm(state));
+            }
+        }
+        return sources.stream().filter(state -> probable.contains(FluidInteractionRecipe.stillForm(state))).toList();
+    }
+
+    /** The fluids among these states that decide for themselves where they may spread. */
+    private Set<Fluid> unrestricted(List<FluidState> sources) {
+        Set<Fluid> fluids = new LinkedHashSet<>();
+        for (FluidState state : sources) {
+            if (runsOwnCode(state.getType(), REACH_METHODS)) {
+                fluids.add(FluidInteractionRecipe.stillForm(state));
+            }
+        }
+        return fluids;
+    }
+
+    /**
+     * Whether this fluid runs spread code of its own from the given set. A configured fluid always counts, since
+     * a rule living outside the fluid's own classes leaves no trace in its class chain.
+     */
+    private boolean runsOwnCode(Fluid fluid, Set<String> methods) {
+        if (forced.contains(String.valueOf(BuiltInRegistries.FLUID.getKey(fluid)))) {
+            return true;
+        }
+        return !Collections.disjoint(declaredSpreadMethods(fluid.getClass()), methods);
+    }
+
+    /** The names from {@link #SPREAD_METHODS} a fluid's own classes declare, below the two base classes. */
+    private Set<String> declaredSpreadMethods(Class<?> fluidClass) {
+        return declaredMethods.computeIfAbsent(fluidClass, key -> {
+            Set<String> names = new LinkedHashSet<>();
+            for (Class<?> type = key; type != null && !isBaseFluid(type); type = type.getSuperclass()) {
+                try {
+                    for (Method method : type.getDeclaredMethods()) {
+                        if (SPREAD_METHODS.contains(method.getName())) {
+                            names.add(method.getName());
+                        }
+                    }
+                } catch (RuntimeException | LinkageError e) {
+                    LOGGER.debug("Reading the methods of {} failed; probing its fluid spread anyway", type.getName(), e);
+                    return SPREAD_METHODS;
+                }
+            }
+            return names;
+        });
+    }
+
+    private static boolean isBaseFluid(Class<?> type) {
+        String name = type.getName();
+        return BASE_FLUIDS.contains(name) || name.startsWith(NEOFORGE_BASE_FLUID);
     }
 
     /**
@@ -134,7 +270,7 @@ public final class SpreadProber {
             return null;
         }
         Fluid still = FluidInteractionRecipe.stillForm(placement.effectiveFluid());
-        for (Placement candidate : candidates) {
+        for (Placement candidate : fluidCandidates) {
             if (candidate.isFluid()
                     && FluidInteractionRecipe.stillForm(candidate.effectiveFluid()) == still
                     && candidate.isFlowing() != placement.isFlowing()) {
@@ -149,6 +285,7 @@ public final class SpreadProber {
      * fluid spreading, keyed by offset from the source.
      */
     private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
+        runs++;
         Map<BlockPos, Placement> scene = new LinkedHashMap<>();
         scene.put(InteractionProber.ORIGIN, Placement.ofFluid(source));
         if (!source.isSource()) {
