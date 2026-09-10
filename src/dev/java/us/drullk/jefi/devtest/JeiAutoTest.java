@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
+import us.drullk.jefi.jei.InertFormIndicator;
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.InteractionProber;
@@ -99,6 +100,7 @@ public final class JeiAutoTest {
                     checkOwnerOrder(recipes);
                     checkFormDifference(recipes);
                     checkPreempted(recipes);
+                    checkIndicator();
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -398,6 +400,26 @@ public final class JeiAutoTest {
         }
         LOGGER.info("Smoke test pre-empted {}: {} alternative(s) of the stone recipe {}, own recipe(s) {}",
                 dyedKey, offenders.size(), spreadRecipe.id(), own.stream().map(recipe -> recipe.id().toString()).toList());
+    }
+
+    /**
+     * The dev fluid's source slot always carries the inert-form indicator (a "?" over its top-right corner)
+     * because its only source fluid has an inert flowing form recorded. Its neighbor slot carries none: hardening
+     * the lava-tagged target does not depend on that target's own form, so neither of its forms is ever inert.
+     */
+    private static void checkIndicator() {
+        if (formRecipe == null) {
+            LOGGER.error("Smoke test has no dev fluid form recipe to check the inert form indicator against");
+            return;
+        }
+        boolean source = InertFormIndicator.sourceMayShow(formRecipe);
+        boolean neighbor = InertFormIndicator.neighborMayShow(formRecipe);
+        if (!source) {
+            LOGGER.error("Smoke test expected the inert form indicator on the source slot of {}, found source {} neighbor {}",
+                    formRecipe.id(), source, neighbor);
+        }
+        LOGGER.info("Smoke test indicator {} (from {}): source slot {}, neighbor slot {}",
+                formRecipe.id(), formRecipe.owner(), source, neighbor);
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

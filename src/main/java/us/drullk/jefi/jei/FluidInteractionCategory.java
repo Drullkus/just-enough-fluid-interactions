@@ -169,6 +169,21 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         addScene(builder, recipe, false, rotation, source, neighbor, BEFORE_X);
         place(builder.addRecipeArrow(), BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE);
         addScene(builder, recipe, true, rotation, source, neighbor, AFTER_X);
+
+        if (slots != null) {
+            if (source != null) {
+                InertFormIndicator indicator = InertFormIndicator.forSource(source, recipe, inputs[0] - 1, ROW_Y);
+                if (indicator != null) {
+                    builder.addWidget(indicator);
+                }
+            }
+            if (neighbor != null && !recipe.neighbors().isEmpty()) {
+                InertFormIndicator indicator = InertFormIndicator.forNeighbor(neighbor, recipe, inputs[1] - 1, ROW_Y);
+                if (indicator != null) {
+                    builder.addWidget(indicator);
+                }
+            }
+        }
     }
 
     @Override
@@ -284,7 +299,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /** The still form of the fluid a slot is currently cycling to, or null when it shows an item or nothing. */
-    private static @Nullable Fluid displayedFluid(IRecipeSlotView view) {
+    static @Nullable Fluid displayedFluid(IRecipeSlotView view) {
         ITypedIngredient<?> displayed = view.getDisplayedIngredient().orElse(null);
         if (displayed == null || !(displayed.getIngredient() instanceof FluidStack stack)) {
             return null;

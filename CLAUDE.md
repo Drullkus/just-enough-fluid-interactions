@@ -90,6 +90,11 @@ Never read, print, or probe that file or those values.
   recipe-relative mouse coordinates, and `SceneWidget`'s own tooltip is only the drag hint. The category's `draw`
   stashes the slot view it is drawn with per recipe so a static scene shows the same alternatives as the tooltip.
   Under EMI scenes do not rotate; under TMRV they show the first alternative only.
+- `InertFormIndicator` is an `IRecipeWidget` per source and neighbor input slot, created only when one of that
+  slot's fluids has an inert other form recorded in `FluidInteractionRecipe.inert`; it reads the displayed fluid
+  each frame and draws a yellow "!" at the slot's top-left, where JEI itself draws a small triple bar for about a
+  second before a slot cycles to its next ingredient. It has no tooltip of its own; the slot's yellow line is the
+  explanation.
 - Slot roles decide what recipe viewers count as a cost: a placement is INPUT only when a result is written at its
   offset and none of its alternatives is a flowing fluid (a flowing fluid costs nothing, its source block
   survives); everything else is CATALYST, which JEI still finds under "uses" and EMI leaves out of its cost tree.
@@ -175,7 +180,8 @@ carries a flowing water neighbor, one `Smoke test spread recipe ...` line provin
 both water forms as alternatives, one `Smoke test order ...` line proving that stone recipe precedes every
 third-party lava recipe, one `Smoke test form difference ...` line proving the dev fluid's recipe carries the still
 form with the flowing form inert and names it in the tooltip text, one `Smoke test pre-empted ...` line proving
-`dyed_water` is absent from the stone recipe's alternatives while its own two recipes exist (an `ERROR` from any
+`dyed_water` is absent from the stone recipe's alternatives while its own two recipes exist, one `Smoke test
+indicator ...` line proving the dev fluid's recipe shows the "!" on its source slot (an `ERROR` from any
 of these is a regression),
 and one `Smoke test recipe ids <sha-256>` line; that hash must not change between runs of the same checkout.
 The EMI run must log `EMI test found N recipe(s)` with the same N as the JEI run's recipe count, four `EMI test
