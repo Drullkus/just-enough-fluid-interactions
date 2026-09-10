@@ -254,8 +254,12 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return (WIDTH - width) / 2 + 1;
     }
 
+    /**
+     * A slot holds blocks as often as fluids, and an amount means nothing for a block in the world, so every slot
+     * keeps JEI's default fluid renderer, which fills the same 16 by 16 at bucket capacity without an amount line.
+     */
     private static IRecipeSlotBuilder slot(IRecipeSlotBuilder slot) {
-        return slot.setStandardSlotBackground().setFluidRenderer(FluidType.BUCKET_VOLUME, false, 16, 16);
+        return slot.setStandardSlotBackground();
     }
 
     /**
