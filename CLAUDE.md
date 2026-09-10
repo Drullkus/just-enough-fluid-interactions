@@ -13,7 +13,9 @@ sandbox level and rendered as 3D scenes with Gander.
   of the `versionRange` in `src/main/templates/META-INF/neoforge.mods.toml`; `runtimeOnly` is a current release.
   Raise the minimum only together with the compile jar.
 - Test mods on the dev classpath, declared in `build.gradle` and never shipped: Gaia Dimension (registers
-  interactions and lava-tagged fluids), Create, Sable, Create Aeronautics. They exist to feed the smoke test.
+  interactions and lava-tagged fluids), Create, Sable, Create Aeronautics, The Bumblezone with Resourceful Lib
+  (its sugar water hardens through a `LiquidBlock` subclass's `neighborChanged`, a channel no probe runs yet).
+  They exist to feed the smoke test.
   EMI (`maven.modrinth:emi`, version `emi_version` in `gradle.properties`, Modrinth's Maven in `build.gradle`) is a
   dependency of the `dev` source set alone, and only the `clientEmiTest` run launches with that source set's
   classpath (`runs.clientEmiTest.sourceSet`), which is what keeps EMI out of every other run; a per-run

@@ -227,6 +227,9 @@ dependencies {
     implementation "curse.maven:sable-1312371:8673825"
     implementation "curse.maven:create-aeronautics-676721:8763471"
 
+    implementation "curse.maven:resourceful-lib-570073:5973188"
+    implementation "curse.maven:the-bumblezone-forge-362479:8548224"
+
     // Gander (world-to-screen rendering library), bundled jar-in-jar. Its modules are FML game libraries,
     // so they ship inside this mod's jar rather than as a separate mod dependency.
     ["core", "levels", "rendering", "ui"].each { module ->
