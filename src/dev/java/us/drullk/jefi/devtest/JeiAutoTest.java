@@ -33,6 +33,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
@@ -62,7 +63,7 @@ public final class JeiAutoTest {
     private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
     private static final String WORLD_NAME = "jei_fluid_interactions_test";
     private static final int RECIPES_PER_SHOT = 2;
-    private static final int MAX_SHOTS = 10;
+    private static final int MAX_SHOTS = 13;
     private static final ResourceLocation LAVA_TYPE = ResourceLocation.withDefaultNamespace("lava");
 
     private static int phase;
@@ -116,6 +117,7 @@ public final class JeiAutoTest {
                     checkSpreadRecipe(recipes);
                     checkOwnerOrder(recipes);
                     checkFormDifference(recipes);
+                    checkPreempted(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -381,10 +383,48 @@ public final class JeiAutoTest {
         }
     }
 
+    /**
+     * The dev water-tagged fluid has a registered interaction of its own with a lava neighbor, which a level runs
+     * on the block update that placing the lava sends, before lava's spread tick reaches the fluid below it. It
+     * therefore belongs in its own recipe rather than among the alternatives of vanilla's stone, even though the
+     * sandbox — which delivers no block updates — sees lava turn it to stone like any other water-tagged fluid.
+     */
+    private static void checkPreempted(List<FluidInteractionRecipe> found) {
+        Fluid dyed = JeiAutoTestFluids.dyedSourceFluid();
+        ResourceLocation dyedKey = BuiltInRegistries.FLUID.getKey(dyed);
+        if (!dyed.defaultFluidState().is(FluidTags.WATER)) {
+            LOGGER.error("Smoke test expected {} to be water-tagged, so lava reaches it; its data pack tag did not load", dyedKey);
+            return;
+        }
+        if (spreadRecipe == null) {
+            LOGGER.error("Smoke test has no stone spread recipe to check pre-emption against");
+            return;
+        }
+        List<String> offenders = Stream.concat(spreadRecipe.neighbors().stream(), spreadRecipe.inert().neighbors().stream())
+                .filter(placement -> placement.isFluid() && FluidInteractionRecipe.stillForm(placement.effectiveFluid()) == dyed)
+                .map(placement -> placement.describe().getString())
+                .toList();
+        if (!offenders.isEmpty()) {
+            LOGGER.error("Smoke test found {} still among the alternatives of the stone recipe {}: {}", dyedKey, spreadRecipe.id(), offenders);
+        }
+        List<FluidInteractionRecipe> own = found.stream()
+                .filter(recipe -> !recipe.isFailure() && recipe.sourceFluids().contains(dyed))
+                .toList();
+        for (Block result : List.of(JeiAutoTestInteractions.DYED_SOURCE_RESULT, JeiAutoTestInteractions.DYED_FLOWING_RESULT)) {
+            if (own.stream().noneMatch(recipe -> result.defaultBlockState().equals(recipe.resultAtSource()))) {
+                LOGGER.error("Smoke test found no {} recipe of {}'s own", BuiltInRegistries.BLOCK.getKey(result), dyedKey);
+            }
+        }
+        LOGGER.info("Smoke test pre-empted {}: {} alternative(s) of the stone recipe {}, own recipe(s) {}",
+                dyedKey, offenders.size(), spreadRecipe.id(), own.stream().map(recipe -> recipe.id().toString()).toList());
+    }
+
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */
     private static void logRecipeIds(List<FluidInteractionRecipe> found) {
         List<String> ids = found.stream().map(recipe -> recipe.id().toString()).sorted().toList();
-        LOGGER.info("Smoke test recipe ids {}", sha256Hex(String.join(",", ids)));
+        String joined = String.join(",", ids);
+        LOGGER.debug("Smoke test recipe id list {}", joined);
+        LOGGER.info("Smoke test recipe ids {}", sha256Hex(joined));
     }
 
     private static String sha256Hex(String value) {

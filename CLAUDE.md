@@ -54,9 +54,13 @@ Never read, print, or probe that file or those values.
 - `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
   `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config. Its compile classpath extends
   `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod. `JeiAutoTestInteractions`
-  registers dev-only interactions and `JeiAutoTestFluids` a dev-only fluid (`hardening_brine`, hardens lava-tagged
-  fluids below it in source form only); a `Fluid` claims its registry holder in its constructor, so dev fluids are
-  built inside `RegisterEvent`, never statically.
+  registers dev-only interactions and `JeiAutoTestFluids` two dev-only fluids: `hardening_brine` (hardens
+  lava-tagged fluids below it in source form only) and `dyed_water` (no spread code of its own, water-tagged
+  through `src/dev/resources/data/minecraft/tags/fluid/water.json` with `required: false`, since runs without the
+  test property never register it; it has its own interaction with lava beside it). A `Fluid` claims its registry
+  holder in its constructor, so dev fluids are built inside `RegisterEvent`, never statically. `build.gradle`
+  declares the source set as `sourceSets { dev }`; naming `src/dev/java` or `src/dev/resources` again feeds every
+  dev resource to `processDevResources` twice.
 - `src/main/resources/META-INF/accesstransformer.cfg`: the only AT; opens `FluidInteractionRegistry.INTERACTIONS`.
 - `src/main/resources/assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
 - `us.drullk.jefi.Config`: the client config (`hideUnprocessable`, `ignoredMods`, `forceSpreadProbe`), registered
@@ -87,6 +91,13 @@ Never read, print, or probe that file or those values.
   outside a fluid's classes, such as a mixin into `FlowingFluid`, needs the fluid listed in `forceSpreadProbe`.
   Fluids declaring none of `tick`, `spread`, `canSpreadTo` are offered only the blocks vanilla's gate admits
   (`LiquidBlockContainer` or `!blocksMotion()`); every fluid candidate is always offered.
+  `SpreadPreemption` then runs before the pattern dedup and `RecipeMerger`: a level delivers the block update
+  first, and `LiquidBlock.shouldSpreadLiquid` runs the registry for the updated block against the block above and
+  its four sides (never below) on that tick, while the spread rule waits for the fluid's scheduled tick. So a
+  spread recipe loses every neighbor alternative that a successful, condition-free registry recipe has as its
+  source (exact form) with the spread source among its neighbors (any form the spread recipe holds); a
+  beside-target is also pre-empted the other way round. Matching inert neighbor forms go with it; a recipe that
+  loses every alternative is dropped; ids never change.
   Below is the canonical target: the registry's own javadoc tests every direction except down and defers
   down-interaction changes to `FlowingFluid#spreadTo` (NeoForge issue 1880 closed the stone request as intended).
   Its fixtures (a bedrock floor for sideways targets, a feeding source above a flowing source) never enter a recipe.
@@ -130,14 +141,18 @@ Compile, then run the smoke test and read the screenshots. Check the log for `Pr
 type and one `Skipped the fluid spread of N of M fluid type(s)` line), `Failed to bake`, and `No probe of fluid interaction ... succeeded` (debug-level, so it is in the dev run's
 `run/logs/debug.log`, not `latest.log`; expected once, for the dev fallback; any other is a regression). Per-interaction failure lines are
 debug so a large pack does not spam the production log; production users see failures only as "Unable to process"
-recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger`. The smoke test also logs one
+recipes and through the `hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger` and one `Registry interactions
+pre-empt N spread alternative(s) in M spread recipe(s)` line from `SpreadPreemption` (`2 ... in 1` in dev: both
+forms of `dyed_water` leave the stone recipe). The smoke test also logs one
 `Smoke test recipe ...` line per recipe with owner, source-state and neighbor counts, `... 0 offender(s)` for the
 duplicate-alternative check, and one `Smoke test merged recipe ...` line proving both merge passes collapsed the
 dev-only mergeable interactions, and one `Smoke test flowing neighbor ...` line proving the cobblestone recipe
 carries a flowing water neighbor, one `Smoke test spread recipe ...` line proving lava over water yields stone with
 both water forms as alternatives, one `Smoke test order ...` line proving that stone recipe precedes every
 third-party lava recipe, one `Smoke test form difference ...` line proving the dev fluid's recipe carries the still
-form with the flowing form inert and names it in the tooltip text (an `ERROR` from any of these is a regression),
+form with the flowing form inert and names it in the tooltip text, one `Smoke test pre-empted ...` line proving
+`dyed_water` is absent from the stone recipe's alternatives while its own two recipes exist (an `ERROR` from any
+of these is a regression),
 and one `Smoke test recipe ids <sha-256>` line; that hash must not change between runs of the same checkout.
 `SpreadProber` logs exactly one info `Fluid spread form difference: ...` line in the dev run, for the dev fluid. The
 stone and dev-fluid recipes get their own screenshots, `jei_fluid_interactions_spread.png` and

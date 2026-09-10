@@ -1,0 +1,12 @@
+{
+  "values": [
+    {
+      "id": "justenoughfluidinteractions:dyed_water",
+      "required": false
+    },
+    {
+      "id": "justenoughfluidinteractions:dyed_water_flowing",
+      "required": false
+    }
+  ]
+}

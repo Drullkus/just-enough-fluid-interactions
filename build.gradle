@@ -26,12 +26,11 @@ sourceSets.main.resources {
     exclude("src/generated/**/.cache") // datagen cache files
 }
 
-// Development-only sources (smoke tests); bound to the mod for runs but never packaged.
+// Development-only sources (smoke tests); bound to the mod for runs but never packaged. src/dev/java and
+// src/dev/resources are this source set's own convention, and naming either again feeds every file in it to
+// processDevResources twice.
 sourceSets {
-    dev {
-        java.srcDir 'src/dev/java'
-        resources.srcDir 'src/dev/resources'
-    }
+    dev
 }
 
 repositories {

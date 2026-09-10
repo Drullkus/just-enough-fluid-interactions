@@ -46,8 +46,9 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  *     read somewhere new, which is what short-circuit evaluation reveals once an earlier clause passes.</li>
  * </ol>
  * Anything that never fires, throws, or writes no block becomes a failure recipe. {@link SpreadProber} then adds
- * what the fluids do on their own, and recipes describing the same pattern are collapsed by {@link RecipeMerger}
- * once everything has been probed.
+ * what the fluids do on their own, {@link SpreadPreemption} takes back the neighbors a registered interaction
+ * consumes before a spread rule can reach them, and recipes describing the same pattern are collapsed by
+ * {@link RecipeMerger} once everything has been probed.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -154,21 +155,31 @@ public final class InteractionProber {
 
         long spreadStart = System.nanoTime();
         SpreadProber spreadProber = new SpreadProber(level, fluidCandidates, blockCandidates);
-        Set<Object> known = new LinkedHashSet<>();
-        fromRegistry.values().forEach(list -> list.forEach(recipe -> known.add(patternKey(recipe))));
-        Map<FluidType, List<FluidInteractionRecipe>> fromSpread = new LinkedHashMap<>();
-        int spreadCount = 0;
+        Map<FluidType, List<FluidInteractionRecipe>> probedSpread = new LinkedHashMap<>();
         for (FluidType type : types) {
-            List<FluidInteractionRecipe> spread = new ArrayList<>(spreadProber.probe(type, sourceStates(type)));
-            spread.removeIf(recipe -> known.contains(patternKey(recipe)));
+            List<FluidInteractionRecipe> spread = spreadProber.probe(type, sourceStates(type));
             if (!spread.isEmpty()) {
-                fromSpread.put(type, spread);
-                spreadCount += spread.size();
+                probedSpread.put(type, spread);
             }
         }
         long spreadNanos = System.nanoTime() - spreadStart;
         LOGGER.debug("Skipped the fluid spread of {} of {} fluid type(s) that inherit all of their spread code",
                 spreadProber.skippedTypes(), types.size());
+
+        List<FluidInteractionRecipe> registryRecipes = new ArrayList<>();
+        fromRegistry.values().forEach(registryRecipes::addAll);
+        Set<Object> known = new LinkedHashSet<>();
+        registryRecipes.forEach(recipe -> known.add(patternKey(recipe)));
+        Map<FluidType, List<FluidInteractionRecipe>> fromSpread = new LinkedHashMap<>();
+        int spreadCount = 0;
+        for (var entry : SpreadPreemption.apply(registryRecipes, probedSpread).entrySet()) {
+            List<FluidInteractionRecipe> spread = new ArrayList<>(entry.getValue());
+            spread.removeIf(recipe -> known.contains(patternKey(recipe)));
+            if (!spread.isEmpty()) {
+                fromSpread.put(entry.getKey(), spread);
+                spreadCount += spread.size();
+            }
+        }
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>();
         for (FluidType type : types) {

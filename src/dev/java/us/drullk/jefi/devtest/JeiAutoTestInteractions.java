@@ -19,8 +19,9 @@ import net.neoforged.neoforge.fluids.FluidType;
  * Development-only fluid interactions registered when the smoke test is enabled, so the JEI category can be
  * checked against cases the bundled mods do not provide: an interaction that can never be exercised (the
  * "Unable to process" fallback), one whose predicate inspects two positions (the multi-position search), one
- * whose predicate does the work itself and registers an empty action, and a set that must collapse into a
- * single recipe through both of {@code RecipeMerger}'s passes.
+ * whose predicate does the work itself and registers an empty action, a set that must collapse into a single
+ * recipe through both of {@code RecipeMerger}'s passes, and one registered on a water-tagged fluid for a lava
+ * neighbor, which is the arrangement {@code SpreadPreemption} takes back from vanilla's stone.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -30,6 +31,10 @@ public final class JeiAutoTestInteractions {
     static final List<Block> MERGE_NEIGHBORS = List.of(Blocks.HAY_BLOCK, Blocks.DRIED_KELP_BLOCK);
     static final List<Holder<FluidType>> MERGE_TYPES = List.of(NeoForgeMod.WATER_TYPE, NeoForgeMod.LAVA_TYPE);
     static final Block MERGE_RESULT = Blocks.MOSS_BLOCK;
+
+    /** Results of the dev fluid's own lava interaction, one per source form, as a colored water mod registers them. */
+    static final Block DYED_SOURCE_RESULT = Blocks.BLUE_TERRACOTTA;
+    static final Block DYED_FLOWING_RESULT = Blocks.CYAN_TERRACOTTA;
 
     private JeiAutoTestInteractions() {
     }
@@ -58,6 +63,12 @@ public final class JeiAutoTestInteractions {
                         return true;
                     },
                     (level, pos, relativePos, state) -> {}));
+            // The dev water-tagged fluid reacting to lava beside it, a different block per source form. A level
+            // runs this on the block update that placing the lava sends, before lava's spread tick reaches it.
+            FluidInteractionRegistry.addInteraction(JeiAutoTestFluids.dyedType(), new InteractionInformation(
+                    (level, pos, relativePos, state) -> level.getFluidState(relativePos).getFluidType() == NeoForgeMod.LAVA_TYPE.value(),
+                    (level, pos, relativePos, state) -> level.setBlock(pos,
+                            (state.isSource() ? DYED_SOURCE_RESULT : DYED_FLOWING_RESULT).defaultBlockState(), Block.UPDATE_ALL)));
             // Same neighbors and result for two fluid types: both merge passes must collapse these into one recipe.
             for (Holder<FluidType> type : MERGE_TYPES) {
                 for (Block neighbor : MERGE_NEIGHBORS) {
