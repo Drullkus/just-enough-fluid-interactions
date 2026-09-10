@@ -51,7 +51,7 @@ import net.neoforged.neoforge.registries.RegisterEvent;
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestFluids {
-    private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
+    private static final boolean ENABLED = AutoTestWorld.FIXTURES;
 
     static final String NAME = "hardening_brine";
     static final Block RESULT = Blocks.TUFF;

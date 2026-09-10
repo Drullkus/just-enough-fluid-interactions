@@ -1,12 +1,10 @@
 package us.drullk.jefi.jei.scene;
 
-import java.util.Map;
 
 import org.jetbrains.annotations.Nullable;
 
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
-import us.drullk.jefi.jei.probe.Placement;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import mezz.jei.api.gui.builder.ITooltipBuilder;
@@ -14,14 +12,10 @@ import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.inputs.IJeiInputHandler;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.gui.widgets.IRecipeWidget;
-import mezz.jei.api.ingredients.ITypedIngredient;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
-import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 
 /**
  * A JEI recipe widget showing one recipe's arrangement before or after the interaction as a 3D scene.
@@ -30,9 +24,7 @@ import net.minecraft.network.chat.Component;
  * by dragging with the left mouse button.
  */
 public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
-    private static final int BACKDROP = 0x30000000;
-
-    private final SceneCache cache;
+    private final SceneView view;
     private final FluidInteractionRecipe recipe;
     private final boolean after;
     private final SceneRotation rotation;
@@ -43,13 +35,10 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     private final int width;
     private final int height;
 
-    private int sortedVersion = -1;
-    private @Nullable SceneVariant sortedVariant;
-
     public SceneWidget(SceneCache cache, FluidInteractionRecipe recipe, boolean after, SceneRotation rotation,
                        @Nullable IRecipeSlotView sourceSlot, @Nullable IRecipeSlotView neighborSlot,
                        int x, int y, int width, int height) {
-        this.cache = cache;
+        this.view = new SceneView(cache, recipe);
         this.recipe = recipe;
         this.after = after;
         this.rotation = rotation;
@@ -75,21 +64,7 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     public void drawWidget(GuiGraphics graphics, double mouseX, double mouseY) {
         rotation.settle();
         SceneCursor.request(this, contains(mouseX, mouseY) || rotation.dragging());
-
-        graphics.fill(0, 0, width, height, BACKDROP);
-        SceneVariant variant = variant();
-        SceneCache.BakedScene scene = cache.get(recipe, variant);
-        if (scene == null) {
-            var font = Minecraft.getInstance().font;
-            graphics.drawCenteredString(font, "?", width / 2, (height - font.lineHeight) / 2, 0xFFFFFFFF);
-            return;
-        }
-        if (!rotation.dragging() && (rotation.version() != sortedVersion || !variant.equals(sortedVariant))) {
-            SceneBakery.resort(scene.level(), SceneRenderer.sortCamera(scene.center(), rotation.yaw(), rotation.pitch()));
-            sortedVersion = rotation.version();
-            sortedVariant = variant;
-        }
-        SceneRenderer.draw(graphics, scene, width, height, rotation.yaw(), rotation.pitch());
+        view.draw(graphics, variant(), width, height, rotation.yaw(), rotation.pitch(), rotation.version(), !rotation.dragging());
     }
 
     @Override
@@ -112,27 +87,14 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     }
 
     /**
-     * A placement line is white when it differs from the same offset in the recipe's other phase, gray when that
-     * phase places the same thing there, so a long list shows what the interaction actually changed at a glance.
+     * Only the drag hint: the placements are the category's tooltip, which every viewer asks for, while a widget's
+     * tooltip is asked for by the layouts that also route the drag.
      */
     @Override
     public void getTooltip(ITooltipBuilder tooltip, double mouseX, double mouseY) {
-        if (!contains(mouseX, mouseY)) {
-            return;
+        if (contains(mouseX, mouseY)) {
+            tooltip.add(Texts.drag().withStyle(ChatFormatting.DARK_GRAY));
         }
-        SceneVariant variant = variant();
-        tooltip.add(Texts.key(after ? "after" : "before").withStyle(ChatFormatting.GRAY));
-        Map<BlockPos, Placement> otherPhase = SceneArrangement.of(recipe, new SceneVariant(variant.source(), variant.neighbor(), !variant.after()));
-        SceneArrangement.of(recipe, variant).forEach((offset, placement) -> {
-            boolean unchanged = placement.equals(otherPhase.get(offset));
-            tooltip.add(
-                    Component.literal("  ")
-                            .append(placement.describe())
-                            .append(" ")
-                            .append(Texts.offset(offset))
-                            .withStyle(unchanged ? ChatFormatting.GRAY : ChatFormatting.WHITE));
-        });
-        tooltip.add(Texts.drag().withStyle(ChatFormatting.DARK_GRAY));
     }
 
     private boolean contains(double mouseX, double mouseY) {
@@ -140,13 +102,6 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     }
 
     private SceneVariant variant() {
-        return new SceneVariant(
-                SceneArrangement.sourceIndex(recipe, displayed(sourceSlot)),
-                SceneArrangement.neighborIndex(recipe, displayed(neighborSlot)),
-                after);
-    }
-
-    private static @Nullable ITypedIngredient<?> displayed(@Nullable IRecipeSlotView slot) {
-        return slot == null ? null : slot.getDisplayedIngredient().orElse(null);
+        return SceneView.variant(recipe, sourceSlot, neighborSlot, after);
     }
 }

@@ -1,13 +1,8 @@
 package us.drullk.jefi.devtest;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Stream;
@@ -27,23 +22,12 @@ import com.mojang.logging.LogUtils;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.Screenshot;
-import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.Difficulty;
-import net.minecraft.world.level.GameRules;
-import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.LevelSettings;
-import net.minecraft.world.level.WorldDataConfiguration;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
@@ -62,6 +46,7 @@ public final class JeiAutoTest {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
     private static final String WORLD_NAME = "jei_fluid_interactions_test";
+    private static final String PREFIX = "Smoke test";
     private static final int RECIPES_PER_SHOT = 2;
     private static final int MAX_SHOTS = 13;
     private static final ResourceLocation LAVA_TYPE = ResourceLocation.withDefaultNamespace("lava");
@@ -84,13 +69,9 @@ public final class JeiAutoTest {
         Minecraft mc = Minecraft.getInstance();
         switch (phase) {
             case 0 -> {
-                if (mc.screen instanceof AccessibilityOnboardingScreen) {
-                    mc.options.onboardAccessibility = false;
-                    mc.setScreen(new TitleScreen());
-                } else if (mc.screen instanceof TitleScreen) {
-                    mc.options.pauseOnLostFocus = false;
+                if (AutoTestWorld.atTitleScreen(mc)) {
                     phase = 1;
-                    enterWorld(mc);
+                    AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX);
                 }
             }
             case 1 -> {
@@ -436,37 +417,7 @@ public final class JeiAutoTest {
         }
     }
 
-    private static void enterWorld(Minecraft mc) {
-        deleteExistingWorld(mc);
-        LOGGER.info("Smoke test creating world {}", WORLD_NAME);
-        GameRules rules = new GameRules();
-        rules.getRule(GameRules.RULE_DAYLIGHT).set(false, null);
-        rules.getRule(GameRules.RULE_WEATHER_CYCLE).set(false, null);
-        rules.getRule(GameRules.RULE_DOMOBSPAWNING).set(false, null);
-        LevelSettings settings = new LevelSettings(WORLD_NAME, GameType.CREATIVE, false, Difficulty.PEACEFUL, true, rules, WorldDataConfiguration.DEFAULT);
-        WorldOptions options = new WorldOptions(1234L, false, false);
-        mc.createWorldOpenFlows().createFreshLevel(WORLD_NAME, settings, options,
-                access -> access.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
-                new TitleScreen());
-    }
-
-    /** Runs from the title screen before any level is loaded, so the save directory is never open here. */
-    private static void deleteExistingWorld(Minecraft mc) {
-        Path path = mc.getLevelSource().getLevelPath(WORLD_NAME);
-        if (!Files.isDirectory(path)) {
-            return;
-        }
-        try (Stream<Path> entries = Files.walk(path)) {
-            for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(entry);
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Smoke test failed to delete existing world " + WORLD_NAME, e);
-        }
-    }
-
     private static void grab(Minecraft mc, String name) {
-        Screenshot.grab(mc.gameDirectory, "jei_fluid_interactions_" + name + ".png", mc.getMainRenderTarget(),
-                message -> LOGGER.info("Smoke test screenshot: {}", message.getString()));
+        AutoTestWorld.grab(mc, "jei_fluid_interactions_" + name + ".png", LOGGER, PREFIX);
     }
 }

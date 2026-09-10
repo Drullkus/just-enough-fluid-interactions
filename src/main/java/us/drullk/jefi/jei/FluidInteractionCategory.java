@@ -1,31 +1,39 @@
 package us.drullk.jefi.jei;
 
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import mezz.jei.common.Internal;
 import org.jetbrains.annotations.Nullable;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.scene.SceneCache;
+import us.drullk.jefi.jei.scene.SceneDrawable;
 import us.drullk.jefi.jei.scene.SceneRotation;
+import us.drullk.jefi.jei.scene.SceneView;
 import us.drullk.jefi.jei.scene.SceneWidget;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.IRecipeSlotBuilder;
+import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.ingredient.IRecipeSlotDrawablesView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
+import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.gui.placement.HorizontalAlignment;
+import mezz.jei.api.gui.placement.IPlaceable;
 import mezz.jei.api.gui.placement.VerticalAlignment;
 import mezz.jei.api.gui.widgets.IRecipeExtrasBuilder;
 import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.IFocusGroup;
+import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.AbstractRecipeCategory;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -64,6 +72,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static final int AFTER_X = WIDTH - BEFORE_X - SCENE_SIZE;
 
     private final SceneCache scenes;
+    /** The slot view each recipe was last drawn with, which is what a static scene takes its alternatives from. */
+    private final Map<FluidInteractionRecipe, IRecipeSlotsView> drawnSlots = new IdentityHashMap<>();
 
     public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
         super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
@@ -81,7 +91,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         int[] inputs = inputSlotX(recipe);
         int next = 0;
 
-        IRecipeSlotBuilder source = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("source");
+        boolean sourceFlows = recipe.sources().stream().anyMatch(state -> !state.isSource());
+        IRecipeSlotBuilder source = slot(builder.addSlot(role(recipe, BlockPos.ZERO, sourceFlows), inputs[next++], ROW_Y)).setSlotName("source");
         recipe.sourceFluids().forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
         source.addRichTooltipCallback((view, tooltip) -> {
             tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY));
@@ -93,7 +104,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         });
 
         if (!recipe.neighbors().isEmpty()) {
-            IRecipeSlotBuilder neighbor = slot(builder.addInputSlot(inputs[next++], ROW_Y)).setSlotName("neighbor");
+            boolean neighborFlows = recipe.neighbors().stream().anyMatch(Placement::isFlowing);
+            IRecipeSlotBuilder neighbor = slot(builder.addSlot(role(recipe, recipe.neighborOffset(), neighborFlows), inputs[next++], ROW_Y)).setSlotName("neighbor");
             addPlacements(neighbor, recipe.neighbors());
             neighbor.addRichTooltipCallback((view, tooltip) -> {
                 tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY));
@@ -106,7 +118,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         }
         for (var condition : recipe.conditions().entrySet()) {
             BlockPos offset = condition.getKey();
-            IRecipeSlotBuilder slot = slot(builder.addInputSlot(inputs[next++], ROW_Y));
+            IRecipeSlotBuilder slot = slot(builder.addSlot(role(recipe, offset, condition.getValue().isFlowing()), inputs[next++], ROW_Y));
             addPlacements(slot, List.of(condition.getValue()));
             slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
         }
@@ -125,32 +137,56 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
 
     @Override
     public void createRecipeExtras(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, IFocusGroup focuses) {
+        // A builder without a slot view can neither position widgets nor route input to them, so its scenes are
+        // static drawables and its text is drawn by hand.
+        IRecipeSlotDrawablesView slots = builder.getRecipeSlots();
+
         if (recipe.isFailure()) {
-            builder.addText(recipe.failure(), WIDTH - 2 * MIN_MARGIN, HEIGHT - SCENE_Y - MIN_MARGIN)
-                    .setPosition(MIN_MARGIN, SCENE_Y)
-                    .setTextAlignment(HorizontalAlignment.CENTER)
-                    .setTextAlignment(VerticalAlignment.CENTER);
+            int textWidth = WIDTH - 2 * MIN_MARGIN;
+            int textHeight = HEIGHT - SCENE_Y - MIN_MARGIN;
+            if (slots == null) {
+                builder.addDrawable(new TextDrawable(recipe.failure(), textWidth, textHeight)).setPosition(MIN_MARGIN, SCENE_Y);
+            } else {
+                builder.addText(recipe.failure(), textWidth, textHeight)
+                        .setPosition(MIN_MARGIN, SCENE_Y)
+                        .setTextAlignment(HorizontalAlignment.CENTER)
+                        .setTextAlignment(VerticalAlignment.CENTER);
+            }
             return;
         }
 
+        // The widget-returning plus sign and arrow builders postdate the oldest supported JEI, so these are the
+        // only entry points to those two textures that every supported version has.
         int[] inputs = inputSlotX(recipe);
         for (int i = 1; i < inputs.length; i++) {
-            int gapX = inputs[i - 1] - 1 + SLOT_SIZE;
-            builder
-                    .addDrawable(Internal.getTextures().getRecipePlusSign()) // FIXME replace with .addRecipePlusSignWidget()
-                    .setPosition(gapX, ROW_Y, PLUS_GAP, 16, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
+            place(builder.addRecipePlusSign(), inputs[i - 1] - 1 + SLOT_SIZE, ROW_Y, PLUS_GAP, 16);
         }
 
-        SceneRotation rotation = new SceneRotation();
-        IRecipeSlotDrawablesView slots = builder.getRecipeSlots();
-        IRecipeSlotView source = slots.findSlotByName("source").orElse(null);
-        IRecipeSlotView neighbor = slots.findSlotByName("neighbor").orElse(null);
+        IRecipeSlotView source = slots == null ? null : slots.findSlotByName("source").orElse(null);
+        IRecipeSlotView neighbor = slots == null ? null : slots.findSlotByName("neighbor").orElse(null);
+        SceneRotation rotation = slots == null ? null : new SceneRotation();
 
-        builder.addWidget(scene(builder, recipe, false, rotation, source, neighbor, BEFORE_X));
-        builder
-                .addDrawable(Internal.getTextures().getRecipeArrow()) // FIXME replace with .addRecipeArrowWidget()
-                .setPosition(BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE, HorizontalAlignment.CENTER, VerticalAlignment.CENTER);
-        builder.addWidget(scene(builder, recipe, true, rotation, source, neighbor, AFTER_X));
+        addScene(builder, recipe, false, rotation, source, neighbor, BEFORE_X);
+        place(builder.addRecipeArrow(), BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE);
+        addScene(builder, recipe, true, rotation, source, neighbor, AFTER_X);
+    }
+
+    @Override
+    public void draw(FluidInteractionRecipe recipe, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
+        drawnSlots.put(recipe, slots);
+    }
+
+    /** The scene under the mouse, described for the alternatives the layout's slots show. */
+    @Override
+    public void getTooltip(ITooltipBuilder tooltip, FluidInteractionRecipe recipe, IRecipeSlotsView slots, double mouseX, double mouseY) {
+        if (recipe.isFailure() || mouseY < SCENE_Y || mouseY >= SCENE_Y + SCENE_SIZE) {
+            return;
+        }
+        boolean before = mouseX >= BEFORE_X && mouseX < BEFORE_X + SCENE_SIZE;
+        boolean after = mouseX >= AFTER_X && mouseX < AFTER_X + SCENE_SIZE;
+        if (before || after) {
+            SceneView.tooltip(tooltip, recipe, SceneView.variant(recipe, slots, after));
+        }
     }
 
     @Override
@@ -158,11 +194,34 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return recipe.id();
     }
 
-    private SceneWidget scene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, SceneRotation rotation,
-                              @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
+    /**
+     * A placement is consumed when the interaction writes a result where it stood, unless one of its alternatives
+     * is a flowing fluid: that one costs nothing, since the source block feeding it survives, and a slot whose
+     * alternatives include a free one is not a cost.
+     */
+    private static RecipeIngredientRole role(FluidInteractionRecipe recipe, BlockPos offset, boolean anyFlowing) {
+        return recipe.results().containsKey(offset) && !anyFlowing ? RecipeIngredientRole.INPUT : RecipeIngredientRole.CATALYST;
+    }
+
+    /** A rotatable widget where the layout can position and drive one, a scene at the default angle otherwise. */
+    private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, @Nullable SceneRotation rotation,
+                          @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
+        if (rotation == null) {
+            SceneDrawable drawable = new SceneDrawable(scenes, recipe, () -> SceneView.variant(recipe, drawnSlots.get(recipe), after), SCENE_SIZE, SCENE_SIZE);
+            builder.addDrawable(drawable).setPosition(x, SCENE_Y);
+            return;
+        }
         SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, source, neighbor, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
         builder.addInputHandler(widget);
-        return widget;
+        builder.addWidget(widget);
+    }
+
+    /**
+     * Centers a placeable in an area, as JEI's aligning overload of {@code setPosition} does: only the two
+     * argument form is guaranteed to be implemented by everything that reads this category's layout.
+     */
+    private static void place(IPlaceable<?> placeable, int x, int y, int areaWidth, int areaHeight) {
+        placeable.setPosition(x + (areaWidth - placeable.getWidth()) / 2, y + (areaHeight - placeable.getHeight()) / 2);
     }
 
     private static int inputCount(FluidInteractionRecipe recipe) {

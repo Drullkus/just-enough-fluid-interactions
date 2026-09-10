@@ -25,7 +25,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
-    private static final boolean ENABLED = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest");
+    private static final boolean ENABLED = AutoTestWorld.FIXTURES;
 
     /** Neighbors of the mergeable interactions; each is registered for every type in {@link #MERGE_TYPES}. */
     static final List<Block> MERGE_NEIGHBORS = List.of(Blocks.HAY_BLOCK, Blocks.DRIED_KELP_BLOCK);

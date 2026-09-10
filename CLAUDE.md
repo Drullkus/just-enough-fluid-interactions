@@ -14,6 +14,10 @@ sandbox level and rendered as 3D scenes with Gander.
   Raise the minimum only together with the compile jar.
 - Test mods on the dev classpath, declared in `build.gradle` and never shipped: Gaia Dimension (registers
   interactions and lava-tagged fluids), Create, Sable, Create Aeronautics. They exist to feed the smoke test.
+  EMI (`maven.modrinth:emi`, version `emi_version` in `gradle.properties`, Modrinth's Maven in `build.gradle`) is a
+  dependency of the `dev` source set alone, and only the `clientEmiTest` run launches with that source set's
+  classpath (`runs.clientEmiTest.sourceSet`), which is what keeps EMI out of every other run; a per-run
+  `additionalRuntimeClasspath` would load it as a plain library, not a mod.
 - Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, bundled jar-in-jar. Version in
   `gradle.properties` (`gander_version`), currently the published `0.2.32`; the jar-in-jar range is `[0.2,1.0)`.
   Nothing resolves from the local Maven repository.
@@ -44,6 +48,9 @@ Never read, print, or probe that file or those values.
 - Compile only: `./gradlew compileJava compileDevJava`.
 - Smoke test in a real client: `./gradlew runClientJeiTest`. Deletes any previous test save, creates a flat world, opens the category, writes
   `run/screenshots/jei_fluid_interactions_*.png`, exits. Takes about 30 s. Read the PNGs to verify rendering.
+- Smoke test through EMI: `./gradlew runClientEmiTest`. Same world and JEI plugin, driven through `EmiApi` (EMI 1.1.24
+  beside JEI, EMI's JEMI bridge running the plugin), writes `run/screenshots/emi_fluid_interactions_*.png`, logs
+  `EMI test ...` lines, exits. About 30 s. Read the PNGs: plus signs, arrow and both scenes must be in place.
 - Plain client: `./gradlew runClient`.
 - The machine's default JDK is 25; this project's wrapper is fine with it. Normal builds never build Gander; if you
   ever build it from source, its Gradle 8.11 needs `JAVA_HOME` pointed at a JDK 21.
@@ -51,9 +58,12 @@ Never read, print, or probe that file or those values.
 ## Source sets
 
 - `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages).
-- `src/dev`: development-only classes bound to the mod for runs, never packaged. Gated by the system property
-  `justenoughfluidinteractions.jeiautotest` set by the `clientJeiTest` run config. Its compile classpath extends
-  `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod. `JeiAutoTestInteractions`
+- `src/dev`: development-only classes bound to the mod for runs, never packaged. `JeiAutoTest` is gated by the
+  system property `justenoughfluidinteractions.jeiautotest` (`clientJeiTest` run config), `EmiAutoTest` by
+  `justenoughfluidinteractions.emiautotest` (`clientEmiTest`), and the fixtures below register under either
+  (`AutoTestWorld.FIXTURES`). `AutoTestWorld` holds the world creation, onboarding dismissal and screenshot code
+  both tests share; `EmiAutoTestSteps` holds every EMI reference, so no other run loads EMI classes. The compile
+  classpath extends `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod. `JeiAutoTestInteractions`
   registers dev-only interactions and `JeiAutoTestFluids` two dev-only fluids: `hardening_brine` (hardens
   lava-tagged fluids below it in source form only) and `dyed_water` (no spread code of its own, water-tagged
   through `src/dev/resources/data/minecraft/tags/fluid/water.json` with `required: false`, since runs without the
@@ -69,6 +79,20 @@ Never read, print, or probe that file or those values.
 
 ## Conventions and gotchas
 
+- The recipe layout is drawn only through JEI API that every viewer reading it implements: EMI's JEMI bridge
+  runs JEI plugins with builders of its own, and TMRV ("Too Many Recipe Viewers") stubs JEI 19.27's API for EMI.
+  So `FluidInteractionCategory` uses the builder's `addRecipePlusSign()`/`addRecipeArrow()` (the `...Widget()`
+  forms postdate the minimum JEI) centred by hand with the two-argument `setPosition` (the aligning overload is
+  abstract in newer JEI and EMI's placeable lacks it), never `mezz.jei.common.Internal`, never a fluid renderer
+  (TMRV throws for a slot that has one and holds a block). A builder whose `getRecipeSlots()` is null (EMI) cannot
+  position widgets, route input or ask widgets for tooltips, so scenes become `SceneDrawable`s and failure text a
+  `TextDrawable`; the scene tooltip lives in the category's `getTooltip`, which JEI and EMI both call with
+  recipe-relative mouse coordinates, and `SceneWidget`'s own tooltip is only the drag hint. The category's `draw`
+  stashes the slot view it is drawn with per recipe so a static scene shows the same alternatives as the tooltip.
+  Under EMI scenes do not rotate; under TMRV they show the first alternative only.
+- Slot roles decide what recipe viewers count as a cost: a placement is INPUT only when a result is written at its
+  offset and none of its alternatives is a flowing fluid (a flowing fluid costs nothing, its source block
+  survives); everything else is CATALYST, which JEI still finds under "uses" and EMI leaves out of its cost tree.
 - No mixins. Access transformers are acceptable. ATs on NeoForge's own classes are applied at runtime by FML but are
   **not visible at compile time** under ModDevGradle; use a reflective lookup (see `RegisteredInteractions`).
 - The sandbox level reports `isClientSide == false` on purpose so interactions guarded on the server side run. Anything
@@ -154,6 +178,8 @@ form with the flowing form inert and names it in the tooltip text, one `Smoke te
 `dyed_water` is absent from the stone recipe's alternatives while its own two recipes exist (an `ERROR` from any
 of these is a regression),
 and one `Smoke test recipe ids <sha-256>` line; that hash must not change between runs of the same checkout.
+The EMI run must log `EMI test found N recipe(s)` with the same N as the JEI run's recipe count, four `EMI test
+screenshot` lines, and no `Exception adding JEMI extras`.
 `SpreadProber` logs exactly one info `Fluid spread form difference: ...` line in the dev run, for the dev fluid. The
 stone and dev-fluid recipes get their own screenshots, `jei_fluid_interactions_spread.png` and
 `jei_fluid_interactions_form.png`; the first should show lava directly over water then over stone. Crop and
