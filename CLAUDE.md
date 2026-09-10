@@ -14,8 +14,10 @@ sandbox level and rendered as 3D scenes with Gander.
   Raise the minimum only together with the compile jar.
 - Test mods on the dev classpath, declared in `build.gradle` and never shipped: Gaia Dimension (registers
   interactions and lava-tagged fluids), Create, Sable, Create Aeronautics, The Bumblezone with Resourceful Lib
-  (its sugar water hardens through a `LiquidBlock` subclass's `neighborChanged`, a channel no probe runs yet).
-  They exist to feed the smoke test.
+  (its sugar water hardens through a `LiquidBlock` subclass's `neighborChanged`, a channel no probe runs yet),
+  DivineRPG (smoldering tar: a lava-tagged fluid with registry interactions and a `spreadTo` copied from vanilla,
+  so it exercises the spread tier, pre-emption, and the sugar water case from above). They exist to feed the
+  smoke test.
   EMI (`maven.modrinth:emi`, version `emi_version` in `gradle.properties`, Modrinth's Maven in `build.gradle`) is a
   dependency of the `dev` source set alone, and only the `clientEmiTest` run launches with that source set's
   classpath (`runs.clientEmiTest.sourceSet`), which is what keeps EMI out of every other run; a per-run

@@ -230,6 +230,8 @@ dependencies {
     implementation "curse.maven:resourceful-lib-570073:5973188"
     implementation "curse.maven:the-bumblezone-forge-362479:8548224"
 
+    implementation "curse.maven:official-divinerpg-363543:7371103"
+
     // Gander (world-to-screen rendering library), bundled jar-in-jar. Its modules are FML game libraries,
     // so they ship inside this mod's jar rather than as a separate mod dependency.
     ["core", "levels", "rendering", "ui"].each { module ->
