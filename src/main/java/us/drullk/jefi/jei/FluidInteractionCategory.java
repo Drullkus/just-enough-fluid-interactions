@@ -16,6 +16,7 @@ import us.drullk.jefi.jei.scene.SceneDrawable;
 import us.drullk.jefi.jei.scene.SceneRotation;
 import us.drullk.jefi.jei.scene.SceneView;
 import us.drullk.jefi.jei.scene.SceneWidget;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.IRecipeSlotBuilder;
@@ -74,6 +75,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private final SceneCache scenes;
     /** The slot view each recipe was last drawn with, which is what a static scene takes its alternatives from. */
     private final Map<FluidInteractionRecipe, IRecipeSlotsView> drawnSlots = new IdentityHashMap<>();
+    /** The angles of the scenes a layout drew as drawables, which is the only rotation a click at the category can turn. */
+    private final Map<FluidInteractionRecipe, SceneRotation> staticRotations = new IdentityHashMap<>();
 
     public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
         super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
@@ -164,11 +167,14 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
 
         IRecipeSlotView source = slots == null ? null : slots.findSlotByName("source").orElse(null);
         IRecipeSlotView neighbor = slots == null ? null : slots.findSlotByName("neighbor").orElse(null);
-        SceneRotation rotation = slots == null ? null : new SceneRotation();
+        SceneRotation rotation = new SceneRotation();
+        if (slots == null) {
+            staticRotations.put(recipe, rotation);
+        }
 
-        addScene(builder, recipe, false, rotation, source, neighbor, BEFORE_X);
+        addScene(builder, recipe, false, slots == null, rotation, source, neighbor, BEFORE_X);
         place(builder.addRecipeArrow(), BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE);
-        addScene(builder, recipe, true, rotation, source, neighbor, AFTER_X);
+        addScene(builder, recipe, true, slots == null, rotation, source, neighbor, AFTER_X);
 
         if (slots != null) {
             if (source != null) {
@@ -194,14 +200,51 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     /** The scene under the mouse, described for the alternatives the layout's slots show. */
     @Override
     public void getTooltip(ITooltipBuilder tooltip, FluidInteractionRecipe recipe, IRecipeSlotsView slots, double mouseX, double mouseY) {
-        if (recipe.isFailure() || mouseY < SCENE_Y || mouseY >= SCENE_Y + SCENE_SIZE) {
+        Boolean after = sceneAt(recipe, mouseX, mouseY);
+        if (after == null) {
             return;
         }
-        boolean before = mouseX >= BEFORE_X && mouseX < BEFORE_X + SCENE_SIZE;
-        boolean after = mouseX >= AFTER_X && mouseX < AFTER_X + SCENE_SIZE;
-        if (before || after) {
-            SceneView.tooltip(tooltip, recipe, SceneView.variant(recipe, slots, after));
+        SceneView.tooltip(tooltip, recipe, SceneView.variant(recipe, slots, after));
+        if (staticRotations.containsKey(recipe)) {
+            tooltip.add(Texts.clickToRotate().withStyle(ChatFormatting.DARK_GRAY));
         }
+    }
+
+    /**
+     * Turns a static scene. A layout that takes widgets gives the click to a {@link SceneWidget} instead, which
+     * claims it, so this only ever runs for the scenes that widget cannot draw; JEI deprecated this in favour of
+     * the widget handlers, and it remains the only input a builder without a slot view can deliver.
+     */
+    @SuppressWarnings("removal")
+    @Override
+    public boolean handleInput(FluidInteractionRecipe recipe, double mouseX, double mouseY, InputConstants.Key input) {
+        SceneRotation rotation = staticRotations.get(recipe);
+        float step = SceneRotation.stepOf(input);
+        if (rotation == null || step == 0.0f || sceneAt(recipe, mouseX, mouseY) == null) {
+            return false;
+        }
+        rotation.step(step);
+        return true;
+    }
+
+    /** The middle of the scene drawn before or after the interaction, in recipe-relative coordinates. */
+    public static int sceneCenterX(boolean after) {
+        return (after ? AFTER_X : BEFORE_X) + SCENE_SIZE / 2;
+    }
+
+    public static int sceneCenterY() {
+        return SCENE_Y + SCENE_SIZE / 2;
+    }
+
+    /** Which scene a recipe-relative point is over: false the one before, true the one after, null neither. */
+    private static @Nullable Boolean sceneAt(FluidInteractionRecipe recipe, double mouseX, double mouseY) {
+        if (recipe.isFailure() || mouseY < SCENE_Y || mouseY >= SCENE_Y + SCENE_SIZE) {
+            return null;
+        }
+        if (mouseX >= BEFORE_X && mouseX < BEFORE_X + SCENE_SIZE) {
+            return Boolean.FALSE;
+        }
+        return mouseX >= AFTER_X && mouseX < AFTER_X + SCENE_SIZE ? Boolean.TRUE : null;
     }
 
     @Override
@@ -218,12 +261,12 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return recipe.results().containsKey(offset) && !anyFlowing ? RecipeIngredientRole.INPUT : RecipeIngredientRole.CATALYST;
     }
 
-    /** A rotatable widget where the layout can position and drive one, a scene at the default angle otherwise. */
-    private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, @Nullable SceneRotation rotation,
+    /** A rotatable widget where the layout can position and drive one, a drawable the category turns otherwise. */
+    private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, boolean drawable, SceneRotation rotation,
                           @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
-        if (rotation == null) {
-            SceneDrawable drawable = new SceneDrawable(scenes, recipe, () -> SceneView.variant(recipe, drawnSlots.get(recipe), after), SCENE_SIZE, SCENE_SIZE);
-            builder.addDrawable(drawable).setPosition(x, SCENE_Y);
+        if (drawable) {
+            SceneDrawable scene = new SceneDrawable(scenes, recipe, () -> SceneView.variant(recipe, drawnSlots.get(recipe), after), rotation, SCENE_SIZE, SCENE_SIZE);
+            builder.addDrawable(scene).setPosition(x, SCENE_Y);
             return;
         }
         SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, source, neighbor, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);

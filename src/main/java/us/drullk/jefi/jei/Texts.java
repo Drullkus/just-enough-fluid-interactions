@@ -26,8 +26,13 @@ public final class Texts {
     }
 
     /** Hint on the scene widgets; carries its own wording so it reads correctly before the key is translated. */
-    public static MutableComponent drag() {
-        return Component.translatableWithFallback(PREFIX + ".drag_to_rotate", "Drag to rotate");
+    public static MutableComponent rotate() {
+        return Component.translatableWithFallback(PREFIX + ".drag_or_click_to_rotate", "Drag or click to rotate");
+    }
+
+    /** The same hint where only clicks reach a scene, which is every layout that cannot take widgets. */
+    public static MutableComponent clickToRotate() {
+        return Component.translatableWithFallback(PREFIX + ".click_to_rotate", "Click to rotate");
     }
 
     /** Describes a position relative to the source fluid, such as "below the source". */

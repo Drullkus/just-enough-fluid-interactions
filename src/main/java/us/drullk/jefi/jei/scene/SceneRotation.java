@@ -2,6 +2,8 @@ package us.drullk.jefi.jei.scene;
 
 import org.lwjgl.glfw.GLFW;
 
+import com.mojang.blaze3d.platform.InputConstants;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
 
@@ -11,12 +13,25 @@ import net.minecraft.util.Mth;
  */
 public final class SceneRotation {
     private static final float DEGREES_PER_PIXEL = 1.0f;
+    private static final float DEGREES_PER_CLICK = 90.0f;
     private static final float MAX_PITCH = 89.0f;
+
+    /** How far one click of a mouse button turns a scene, zero for every key that does not turn one. */
+    public static float stepOf(InputConstants.Key key) {
+        if (key.getType() != InputConstants.Type.MOUSE) {
+            return 0.0f;
+        }
+        if (key.getValue() == InputConstants.MOUSE_BUTTON_LEFT) {
+            return DEGREES_PER_CLICK;
+        }
+        return key.getValue() == InputConstants.MOUSE_BUTTON_RIGHT ? -DEGREES_PER_CLICK : 0.0f;
+    }
 
     private float yaw = SceneRenderer.DEFAULT_YAW;
     private float pitch = SceneRenderer.DEFAULT_PITCH;
     private int version;
     private boolean dragging;
+    private boolean dragged;
 
     public float yaw() {
         return yaw;
@@ -35,11 +50,27 @@ public final class SceneRotation {
         return dragging;
     }
 
+    /** Whether the button that is down has moved since it was pressed, so a click can tell itself from a drag. */
+    public boolean dragged() {
+        return dragged;
+    }
+
+    public void press() {
+        dragged = false;
+    }
+
+    /** Turns the yaw by one click, leaving the pitch where it is. */
+    public void step(float degrees) {
+        yaw = Mth.wrapDegrees(yaw + degrees);
+        version++;
+    }
+
     public void drag(double dragX, double dragY) {
         yaw = Mth.wrapDegrees(yaw + (float) dragX * DEGREES_PER_PIXEL);
         pitch = Mth.clamp(pitch + (float) dragY * DEGREES_PER_PIXEL, -MAX_PITCH, MAX_PITCH);
         version++;
         dragging = true;
+        dragged = true;
     }
 
     /**

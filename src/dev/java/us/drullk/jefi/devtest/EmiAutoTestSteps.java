@@ -1,17 +1,22 @@
 package us.drullk.jefi.devtest;
 
+import java.lang.reflect.Field;
 import java.util.List;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.jei.FluidInteractionCategory;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import com.mojang.logging.LogUtils;
 
 import dev.emi.emi.api.EmiApi;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
+import dev.emi.emi.screen.RecipeScreen;
+import dev.emi.emi.screen.WidgetGroup;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -53,7 +58,7 @@ final class EmiAutoTestSteps {
                     EmiRecipeCategory category = category();
                     if (category == null) {
                         LOGGER.error("{} found no EMI category for {}", PREFIX, FluidInteractionsJeiPlugin.TYPE.getUid());
-                        phase = 5;
+                        phase = 7;
                         return;
                     }
                     recipes = order(EmiApi.getRecipeManager().getRecipes(category));
@@ -85,13 +90,61 @@ final class EmiAutoTestSteps {
             }
             case 4 -> {
                 if (--timer <= 0) {
-                    LOGGER.info("{} finished, stopping the client", PREFIX);
+                    rotate(mc);
                     phase = 5;
+                    timer = 20;
+                }
+            }
+            case 5 -> {
+                if (--timer <= 0) {
+                    grab(mc, "rotated");
+                    phase = 6;
+                    timer = 10;
+                }
+            }
+            case 6 -> {
+                if (--timer <= 0) {
+                    LOGGER.info("{} finished, stopping the client", PREFIX);
+                    phase = 7;
                     mc.stop();
                 }
             }
             default -> {
             }
+        }
+    }
+
+    /**
+     * Clicks the middle of the left scene of the recipe on screen, which is the click EMI hands to the category
+     * and the only rotation its static scenes have.
+     */
+    private static void rotate(Minecraft mc) {
+        Screen screen = mc.screen;
+        WidgetGroup group = screen instanceof RecipeScreen ? firstGroup(screen) : null;
+        if (group == null) {
+            LOGGER.error("{} found no recipe widget group to click on {}", PREFIX, screen);
+            return;
+        }
+        double x = group.x() + FluidInteractionCategory.sceneCenterX(false);
+        double y = group.y() + FluidInteractionCategory.sceneCenterY();
+        boolean handled = screen.mouseClicked(x, y, 0);
+        if (handled) {
+            LOGGER.info("{} clicked the left scene at {}, {}", PREFIX, x, y);
+        } else {
+            LOGGER.error("{} clicked the left scene at {}, {} and nothing took the click", PREFIX, x, y);
+        }
+    }
+
+    /** EMI keeps the groups of the page it shows to itself, and the recipe this test clicks is the first. */
+    private static @Nullable WidgetGroup firstGroup(Screen screen) {
+        try {
+            Field field = RecipeScreen.class.getDeclaredField("currentPage");
+            field.setAccessible(true);
+            List<?> groups = (List<?>) field.get(screen);
+            return groups.isEmpty() ? null : (WidgetGroup) groups.get(0);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LOGGER.error("{} could not read the recipe widget groups", PREFIX, e);
+            return null;
         }
     }
 
