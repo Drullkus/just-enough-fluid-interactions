@@ -32,8 +32,8 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * {@link #neighborIndex} picks the alternative that matches.
  */
 public final class SceneArrangement {
-    /** Fluid level of a block drawn in its flowing form; probing uses a full flow, this only has to read as one. */
-    public static final int DISPLAY_FLOW_LEVEL = 1;
+    /** Fluid level of a block drawn in its flowing form; probing uses a full flow, a different value than assigned here. */
+    public static final int DISPLAY_FLOW_LEVEL = 6;
 
     private SceneArrangement() {
     }
