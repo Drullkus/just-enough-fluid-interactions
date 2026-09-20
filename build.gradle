@@ -241,6 +241,8 @@ dependencies {
 
     implementation "curse.maven:official-divinerpg-363543:7371103"
 
+    localRuntime "curse.maven:worldedit-225608:5830452"
+
     // Gander (world-to-screen rendering library), bundled jar-in-jar. Its modules are FML game libraries,
     // so they ship inside this mod's jar rather than as a separate mod dependency.
     ["core", "levels", "rendering", "ui"].each { module ->
