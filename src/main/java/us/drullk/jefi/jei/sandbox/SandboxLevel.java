@@ -42,8 +42,8 @@ import net.neoforged.neoforge.client.model.data.ModelDataManager;
  * A throwaway {@link net.minecraft.world.level.Level} used to execute fluid interactions outside any real world.
  *
  * <p>Built on Gander's {@link VirtualLevel} for all the boilerplate (chunk source, light engine, biome, no-op
- * sounds and events), but with its own block and fluid storage so that a fluid state can be present without a
- * block, so bucket-only fluids can still be probed, and so every read and write can be recorded.
+ * sounds and events), but with its own block and fluid storage so that the level reports back the exact fluid
+ * state a probe placed rather than whatever its block turns into, and so every read and write can be recorded.
  *
  * <p>The level has two modes. While it is quiet a write only lands in storage: no {@code onRemove}, no
  * {@code onPlace}, no neighbor notification, no shape update. That is what a probe tier needs while it calls one
@@ -117,7 +117,7 @@ public final class SandboxLevel extends VirtualLevel {
         }
     }
 
-    /** Places a fluid state, using its legacy block when it has one, and keeps the state even when it has none. */
+    /** Places a fluid state through its own block, keeping the state itself as what the level reports there. */
     public void placeFluid(BlockPos pos, FluidState state) {
         placeBlock(pos, state.createLegacyBlock());
         if (!state.isEmpty()) {
@@ -125,17 +125,8 @@ public final class SandboxLevel extends VirtualLevel {
         }
     }
 
-    /**
-     * Places one part of a settling arrangement the way a level does, through a real {@code setBlock} with every
-     * update flag set. A fluid no block can hold is stored directly instead: no level can be put into that state,
-     * so there is no placement for a level to run.
-     */
+    /** Places one part of a settling arrangement the way a level does: a real {@code setBlock}, every flag set. */
     public void placeLive(BlockPos pos, Placement placement) {
-        FluidState fluid = placement.fluid();
-        if (fluid != null && placement.block().isAir()) {
-            placeFluid(pos, fluid);
-            return;
-        }
         setBlock(pos, placement.block(), Block.UPDATE_ALL);
     }
 

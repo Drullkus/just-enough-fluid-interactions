@@ -88,7 +88,7 @@ public final class Settler {
      */
     public Outcome settle(Map<BlockPos, Placement> content, BlockPos neighborOffset, Map<BlockPos, BlockState> wrote) {
         Rest rest = rest(content, neighborOffset);
-        String preempted = preempted(rest, wrote);
+        Preemption preempted = preempted(rest, wrote);
         if (preempted != null) {
             return new Outcome(Map.of(), preempted);
         }
@@ -105,9 +105,25 @@ public final class Settler {
 
     /**
      * What one settled arrangement says. Either it produced results, which may be empty, or a level pre-empted
-     * the rule that proposed it and {@link #preempted()} names what stands where that rule wrote instead.
+     * the rule that proposed it and {@link #preempted()} says what stands where that rule wrote instead.
      */
-    public record Outcome(Map<BlockPos, BlockState> results, @Nullable String preempted) {
+    public record Outcome(Map<BlockPos, BlockState> results, @Nullable Preemption preempted) {
+    }
+
+    /**
+     * What a level holds where a rule wrote. The first difference carries the whole observation a recipe can
+     * state, while {@link #describe()} names every one of them for the log.
+     *
+     * @param offset   the first position, keyed from the source, where the settled level differs
+     * @param found    what the settled level holds there
+     * @param wrote    what the rule itself wrote there
+     * @param describe every difference of the arrangement, as one line
+     */
+    public record Preemption(BlockPos offset, BlockState found, BlockState wrote, String describe) {
+        @Override
+        public String toString() {
+            return describe;
+        }
     }
 
     private Rest rest(Map<BlockPos, Placement> content, BlockPos neighborOffset) {
@@ -187,18 +203,28 @@ public final class Settler {
      * one of its writes survived. An arrangement that threw says nothing about any rule, so it is never
      * pre-empted.
      */
-    private static @Nullable String preempted(Rest rest, Map<BlockPos, BlockState> wrote) {
+    private static @Nullable Preemption preempted(Rest rest, Map<BlockPos, BlockState> wrote) {
         if (!rest.completed()) {
             return null;
         }
-        List<String> differences = new ArrayList<>();
-        wrote.forEach((offset, written) -> {
-            BlockState found = rest.stateAt(offset);
-            if (!survived(written, found)) {
-                differences.add(offset.toShortString() + " holds " + key(found) + " rather than " + key(written));
+        List<String> lines = new ArrayList<>();
+        BlockPos offset = null;
+        BlockState found = null;
+        for (var entry : wrote.entrySet()) {
+            BlockState there = rest.stateAt(entry.getKey());
+            if (survived(entry.getValue(), there)) {
+                continue;
             }
-        });
-        return differences.isEmpty() ? null : String.join(", ", differences);
+            if (offset == null) {
+                offset = entry.getKey();
+                found = there;
+            }
+            lines.add(entry.getKey().toShortString() + " holds " + key(there) + " rather than " + key(entry.getValue()));
+        }
+        if (offset == null) {
+            return null;
+        }
+        return new Preemption(offset, found, wrote.get(offset), String.join(", ", lines));
     }
 
     /** Whether the settled state is the state a rule wrote, a fluid counting as itself whatever its level. */

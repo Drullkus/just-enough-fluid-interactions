@@ -1,5 +1,7 @@
 package us.drullk.jefi.jei;
 
+import org.jetbrains.annotations.Nullable;
+
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
@@ -8,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 /** Translation helpers for the fluid interaction category. */
@@ -33,6 +36,25 @@ public final class Texts {
     /** The same hint where only clicks reach a scene, which is every layout that cannot take widgets. */
     public static MutableComponent clickToRotate() {
         return Component.translatableWithFallback(PREFIX + ".click_to_rotate", "Click to rotate");
+    }
+
+    /**
+     * Two sentences in Simplified Technical English: what the interaction changes the source into, given the
+     * neighbor beside it, and what the source changes into in the world, or that it does not change.
+     */
+    public static MutableComponent preempted(FluidState source, @Nullable Placement neighbor, BlockState found, BlockState wrote) {
+        Component sourceName = Placement.ofFluid(source).describe();
+        Component foundName = found.getBlock().getName();
+        Component wroteName = wrote.getBlock().getName();
+        boolean unchanged = found.getBlock() == source.createLegacyBlock().getBlock();
+        if (neighbor == null) {
+            return unchanged
+                    ? key("preempted.alone.unchanged", sourceName, wroteName, sourceName)
+                    : key("preempted.alone", sourceName, wroteName, sourceName, foundName);
+        }
+        return unchanged
+                ? key("preempted.unchanged", sourceName, neighbor.describe(), wroteName, sourceName)
+                : key("preempted", sourceName, neighbor.describe(), wroteName, sourceName, foundName);
     }
 
     /** Describes a position relative to the source fluid, such as "below the source". */

@@ -3,10 +3,14 @@ package us.drullk.jefi.devtest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.jetbrains.annotations.Nullable;
@@ -28,6 +32,7 @@ import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.Block;
@@ -62,10 +67,6 @@ public final class JeiAutoTest {
     private static final ResourceLocation SUGAR_INFUSED_STONE = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "sugar_infused_stone");
     private static final ResourceLocation SUGAR_INFUSED_COBBLESTONE = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "sugar_infused_cobblestone");
     private static final ResourceLocation SUGAR_WATER = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "sugar_water");
-    /** The lava-tagged fluids on the dev classpath, in both forms, as the sugar water probe finds them. */
-    private static final int SUGAR_WATER_ALTERNATIVES = 8;
-    /** The same minus both forms of lava, which a registry interaction of lava's own consumes sideways first. */
-    private static final int SUGAR_WATER_BESIDE_ALTERNATIVES = 6;
     /** DivineRPG's lava-tagged tar, the second fluid that reaches sugar water and the second spread recipe to lose it. */
     private static final ResourceLocation TAR_TYPE = ResourceLocation.fromNamespaceAndPath("divinerpg", "smoldering_tar_fluid_type");
     private static final String TAR_SPREAD_IDS = "spread/divinerpg/smoldering_tar_fluid_type/";
@@ -73,6 +74,16 @@ public final class JeiAutoTest {
     private static final String LAVA_SPREAD_IDS = "spread/minecraft/lava/";
     /** The Bumblezone's honey, whose result block changes a neighbor of its own when it is placed. */
     private static final String HONEY_IDS = "neighbor/the_bumblezone/honey/";
+    /** The same honey as a fluid type, which Biomes O' Plenty registers an interaction on. */
+    private static final ResourceLocation HONEY_TYPE = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "honey");
+    /** The block a level holds where that interaction would write, which is the honey the probe placed. */
+    private static final ResourceLocation HONEY_BLOCK = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "honey_fluid_block");
+    private static final String BOP = "biomesoplenty";
+    /** The neighbor Biomes O' Plenty's interaction looks for, and the two blocks it writes. */
+    private static final ResourceLocation BLOOD = ResourceLocation.fromNamespaceAndPath(BOP, "blood");
+    private static final List<ResourceLocation> FLESH = List.of(
+            ResourceLocation.fromNamespaceAndPath(BOP, "flesh"),
+            ResourceLocation.fromNamespaceAndPath(BOP, "porous_flesh"));
 
     private static int phase;
     private static int timer;
@@ -83,6 +94,7 @@ public final class JeiAutoTest {
     private static @Nullable FluidInteractionRecipe neighborRecipe;
     private static @Nullable FluidInteractionRecipe cascadeRecipe;
     private static @Nullable FluidInteractionRecipe offsetRecipe;
+    private static @Nullable FluidInteractionRecipe preemptedRecipe;
 
     private JeiAutoTest() {
     }
@@ -130,6 +142,8 @@ public final class JeiAutoTest {
                     checkIndicator();
                     checkCascade(recipes);
                     checkOffsetRecipe(recipes);
+                    checkPreemptedInteraction(recipes);
+                    checkPreemptedThirdPartyInteraction(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -230,14 +244,28 @@ public final class JeiAutoTest {
                     if (offsetRecipe != null) {
                         grab(mc, "offset");
                     }
+                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+                    if (preemptedRecipe != null && runtime != null) {
+                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+                        runtime.getRecipesGui().showRecipes(category, List.of(preemptedRecipe), List.of());
+                    }
                     phase = 10;
-                    timer = 10;
+                    timer = 25;
                 }
             }
             case 10 -> {
                 if (--timer <= 0) {
-                    LOGGER.info("Smoke test finished, stopping the client");
+                    if (preemptedRecipe != null) {
+                        grab(mc, "preempted");
+                    }
                     phase = 11;
+                    timer = 10;
+                }
+            }
+            case 11 -> {
+                if (--timer <= 0) {
+                    LOGGER.info("Smoke test finished, stopping the client");
+                    phase = 12;
                     mc.stop();
                 }
             }
@@ -497,21 +525,21 @@ public final class JeiAutoTest {
                     recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
         }
 
-        for (BlockPos offset : List.of(FluidInteractionRecipe.NEIGHBOR_OFFSET, NeighborProber.ABOVE_OFFSET)) {
-            FluidInteractionRecipe stone = hardened(matches, offset, SUGAR_INFUSED_STONE, false);
-            FluidInteractionRecipe cobblestone = hardened(matches, offset, SUGAR_INFUSED_COBBLESTONE, true);
-            if (offset.equals(NeighborProber.ABOVE_OFFSET)) {
-                neighborRecipe = stone;
+        for (Map.Entry<ResourceLocation, Boolean> hardening : Map.of(SUGAR_INFUSED_STONE, false, SUGAR_INFUSED_COBBLESTONE, true).entrySet()) {
+            FluidInteractionRecipe above = hardened(matches, NeighborProber.ABOVE_OFFSET, hardening.getKey(), hardening.getValue());
+            FluidInteractionRecipe beside = hardened(matches, FluidInteractionRecipe.NEIGHBOR_OFFSET, hardening.getKey(), hardening.getValue());
+            if (above != null && SUGAR_INFUSED_STONE.equals(hardening.getKey())) {
+                neighborRecipe = above;
             }
-            for (FluidInteractionRecipe recipe : Stream.of(stone, cobblestone).filter(recipe -> recipe != null).toList()) {
-                if (offset.equals(NeighborProber.ABOVE_OFFSET)) {
-                    checkBothForms(recipe, Fluids.LAVA::isSame, "minecraft:lava");
-                }
+            if (above != null) {
+                checkBothForms(above, Fluids.LAVA::isSame, "minecraft:lava");
+            }
+            for (FluidInteractionRecipe recipe : Stream.of(above, beside).filter(recipe -> recipe != null).toList()) {
                 checkBothForms(recipe, fluid -> TAR_TYPE.equals(NeoForgeRegistries.FLUID_TYPES.getKey(fluid.getFluidType())), TAR_TYPE.toString());
             }
+            checkNeighborRegistryPreempted(hardening.getKey(), above, beside);
         }
 
-        checkNeighborRegistryPreempted(matches);
         checkSugarWaterGone(spreadRecipe, "the stone");
         checkSugarWaterGone(found.stream().filter(recipe -> recipe.id().getPath().startsWith(TAR_SPREAD_IDS)).findFirst().orElse(null), "the tar");
     }
@@ -553,29 +581,65 @@ public final class JeiAutoTest {
      * verified. So among the recipes that harden the sugar water itself, those whose neighbor sits beside it hold
      * neither form of lava and those whose neighbor sits above it hold both.
      */
-    private static void checkNeighborRegistryPreempted(List<FluidInteractionRecipe> matches) {
-        List<FluidInteractionRecipe> hardened = matches.stream().filter(recipe -> recipe.resultAtSource() != null).toList();
-        for (FluidInteractionRecipe recipe : hardened) {
-            boolean beside = recipe.neighborOffset().getY() == 0;
-            List<String> lava = lavaForms(recipe);
-            int expected = beside ? SUGAR_WATER_BESIDE_ALTERNATIVES : SUGAR_WATER_ALTERNATIVES;
-            if (beside && !lava.isEmpty()) {
-                LOGGER.error("Smoke test found minecraft:lava still among the alternatives of sugar water recipe {} with its neighbor {}: {}",
-                        recipe.id(), Texts.offset(recipe.neighborOffset()).getString(), lava);
-            }
-            if (!beside && lava.isEmpty()) {
-                LOGGER.error("Smoke test expected minecraft:lava among the alternatives of sugar water recipe {} with its neighbor {}, found none",
-                        recipe.id(), Texts.offset(recipe.neighborOffset()).getString());
-            }
-            if (recipe.neighbors().size() != expected) {
-                LOGGER.error("Smoke test expected {} alternative(s) of sugar water recipe {}, found {}: {}",
-                        expected, recipe.id(), recipe.neighbors().size(),
-                        recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
-            }
+    private static void checkNeighborRegistryPreempted(ResourceLocation result, @Nullable FluidInteractionRecipe above,
+                                                       @Nullable FluidInteractionRecipe beside) {
+        if (above == null || beside == null) {
+            LOGGER.error("Smoke test has no pair of sugar water recipes writing {} to compare across neighbor positions", result);
+            return;
         }
-        LOGGER.info("Smoke test neighbor registry pre-empted minecraft:lava: {}",
-                hardened.stream().map(recipe -> recipe.id() + " " + Texts.offset(recipe.neighborOffset()).getString()
-                        + " " + recipe.neighbors().size() + " alternative(s), lava " + lavaForms(recipe)).toList());
+        Set<String> lava = forms(Fluids.LAVA);
+        Set<String> aboveKeys = alternatives(above, placement -> true);
+        Set<String> besideKeys = alternatives(beside, placement -> true);
+        if (!aboveKeys.containsAll(lava)) {
+            LOGGER.error("Smoke test expected both forms of minecraft:lava among the alternatives of sugar water recipe {} with its neighbor {}, found {}",
+                    above.id(), Texts.offset(above.neighborOffset()).getString(), lavaForms(above));
+        }
+        if (besideKeys.stream().anyMatch(lava::contains)) {
+            LOGGER.error("Smoke test found minecraft:lava still among the alternatives of sugar water recipe {} with its neighbor {}: {}",
+                    beside.id(), Texts.offset(beside.neighborOffset()).getString(), lavaForms(beside));
+        }
+        Set<String> besideOnly = new LinkedHashSet<>(alternatives(beside, JeiAutoTest::isLavaTagged));
+        besideOnly.removeAll(aboveKeys);
+        if (!besideOnly.isEmpty()) {
+            LOGGER.error("Smoke test found lava-tagged alternative(s) of sugar water recipe {} that recipe {} does not hold: {}",
+                    beside.id(), above.id(), besideOnly);
+        }
+        Set<String> aboveOnly = new LinkedHashSet<>(aboveKeys);
+        aboveOnly.removeAll(besideKeys);
+        if (!aboveOnly.equals(lava)) {
+            LOGGER.error("Smoke test expected the alternatives of sugar water recipe {} to be those of {} plus both forms of minecraft:lava, found {} extra",
+                    above.id(), beside.id(), aboveOnly);
+        }
+        LOGGER.info("Smoke test neighbor registry pre-empted minecraft:lava writing {}: {} {} {} alternative(s), {} {} {} alternative(s), only above {}",
+                result, above.id(), Texts.offset(above.neighborOffset()).getString(), aboveKeys.size(),
+                beside.id(), Texts.offset(beside.neighborOffset()).getString(), besideKeys.size(), aboveOnly);
+    }
+
+    /** The matching neighbor alternatives of one recipe, inert ones included, keyed to compare across recipes. */
+    private static Set<String> alternatives(FluidInteractionRecipe recipe, Predicate<Placement> wanted) {
+        return Stream.concat(recipe.neighbors().stream(), recipe.inert().neighbors().stream())
+                .filter(wanted)
+                .map(JeiAutoTest::alternativeKey)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /** A neighbor alternative's identity across recipes: its fluid and form, or its block. */
+    private static String alternativeKey(Placement placement) {
+        if (placement.isFluid()) {
+            return BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(placement.effectiveFluid()))
+                    + (placement.isFlowing() ? "#flowing" : "#source");
+        }
+        return String.valueOf(BuiltInRegistries.BLOCK.getKey(placement.block().getBlock()));
+    }
+
+    /** Both forms of one fluid, keyed the way {@link #alternativeKey} keys an alternative holding them. */
+    private static Set<String> forms(Fluid fluid) {
+        ResourceLocation key = BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(fluid.defaultFluidState()));
+        return Set.of(key + "#source", key + "#flowing");
+    }
+
+    private static boolean isLavaTagged(Placement placement) {
+        return placement.isFluid() && placement.effectiveFluid().is(FluidTags.LAVA);
     }
 
     /**
@@ -738,6 +802,85 @@ public final class JeiAutoTest {
         LOGGER.info("Smoke test offset recipe {}: condition {}[waterlogged={}] at {}", recipe.id(),
                 BuiltInRegistries.BLOCK.getKey(written.getBlock()), written.getValue(BlockStateProperties.WATERLOGGED),
                 Texts.offset(recipe.neighborOffset()).getString());
+    }
+
+    /**
+     * The dev interaction registered on lava for a water neighbor is answered by the interaction registered on
+     * lava before it, whatever the arrangement, so it produces no recipe of its own. Its failure recipe has to
+     * name what a level holds there instead rather than say only that it could not be processed.
+     */
+    private static void checkPreemptedInteraction(List<FluidInteractionRecipe> found) {
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(FluidInteractionRecipe::isFailure)
+                .filter(recipe -> LAVA_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> JustEnoughFluidInteractions.MODID.equals(recipe.owner()))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one failure recipe from the pre-empted dev interaction on {}, found {}: {}",
+                    LAVA_TYPE, matches.size(), matches.stream().map(recipe -> recipe.id().toString()).toList());
+            return;
+        }
+        FluidInteractionRecipe recipe = matches.getFirst();
+        preemptedRecipe = recipe;
+        String text = failureText(recipe);
+        List<String> expected = List.of(
+                Fluids.LAVA.getFluidType().getDescription().getString(),
+                Fluids.WATER.getFluidType().getDescription().getString(),
+                Blocks.OBSIDIAN.getName().getString(),
+                JeiAutoTestInteractions.PREEMPTED_RESULT.getName().getString());
+        List<String> missing = expected.stream().filter(name -> !text.contains(name)).toList();
+        if (!missing.isEmpty()) {
+            LOGGER.error("Smoke test expected the failure text of {} to name {}, found \"{}\"", recipe.id(), missing, text);
+        }
+        LOGGER.info("Smoke test pre-empted interaction {}: {}", recipe.id(), text);
+    }
+
+    /**
+     * Biomes O' Plenty registers its blood interaction on every fluid type, The Bumblezone's honey among them.
+     * The honey's own block class answers the block update that placing the blood sends, so a level holds the
+     * honey where that interaction writes flesh. Its failure recipe has to name both fluids and both blocks,
+     * which is the same text as the dev fixture's over an arrangement nothing here set up.
+     */
+    private static void checkPreemptedThirdPartyInteraction(List<FluidInteractionRecipe> found) {
+        String blood = fluidName(BLOOD);
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(FluidInteractionRecipe::isFailure)
+                .filter(recipe -> HONEY_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> BOP.equals(recipe.owner()))
+                .filter(recipe -> failureText(recipe).contains(blood))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one failure recipe from {}'s {} interaction on {}, found {}: {}",
+                    BOP, blood, HONEY_TYPE, matches.size(), matches.stream().map(recipe -> recipe.id().toString()).toList());
+            return;
+        }
+        FluidInteractionRecipe recipe = matches.getFirst();
+        String text = failureText(recipe);
+        List<String> missing = new ArrayList<>(Stream.of(recipe.sourceType().getDescription().getString(), blockName(HONEY_BLOCK))
+                .filter(name -> !text.contains(name))
+                .toList());
+        if (FLESH.stream().map(JeiAutoTest::blockName).noneMatch(text::contains)) {
+            missing.add(FLESH.stream().map(JeiAutoTest::blockName).toList().toString());
+        }
+        if (!missing.isEmpty()) {
+            LOGGER.error("Smoke test expected the failure text of {} to name {}, found \"{}\"", recipe.id(), missing, text);
+        }
+        LOGGER.info("Smoke test pre-empted third-party interaction {}: {}", recipe.id(), text);
+    }
+
+    private static String failureText(FluidInteractionRecipe recipe) {
+        Component failure = recipe.failure();
+        return failure != null ? failure.getString() : "";
+    }
+
+    /** How a placement line names a fluid, so a failure text can be checked against the same wording. */
+    private static String fluidName(ResourceLocation key) {
+        Fluid fluid = BuiltInRegistries.FLUID.get(key);
+        return fluid.defaultFluidState().isEmpty() ? key.toString() : fluid.getFluidType().getDescription().getString();
+    }
+
+    private static String blockName(ResourceLocation key) {
+        return BuiltInRegistries.BLOCK.get(key).getName().getString();
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

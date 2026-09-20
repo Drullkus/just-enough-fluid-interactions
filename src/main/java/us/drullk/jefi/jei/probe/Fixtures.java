@@ -73,7 +73,7 @@ public final class Fixtures {
             return;
         }
         FluidState feed = FluidInteractionRecipe.stillForm(placement.effectiveFluid()).defaultFluidState();
-        if (!feed.isSource() || feed.createLegacyBlock().isAir()) {
+        if (!feed.isSource() || !FluidBlocks.hasBlock(feed.getType())) {
             return;
         }
         for (BlockPos direction : Stream.concat(Stream.of(preferred), FEED_DIRECTIONS.stream()).distinct().toList()) {

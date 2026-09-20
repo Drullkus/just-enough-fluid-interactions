@@ -21,9 +21,9 @@ import net.neoforged.neoforge.fluids.FluidType;
  * checked against cases the bundled mods do not provide: an interaction that can never be exercised (the
  * "Unable to process" fallback), one whose predicate inspects two positions (the multi-position search), one
  * whose predicate does the work itself and registers an empty action, a set that must collapse into a single
- * recipe through both of {@code RecipeMerger}'s passes, and one registered on a water-tagged fluid for a lava
+ * recipe through both of {@code RecipeMerger}'s passes, one registered on a water-tagged fluid for a lava
  * neighbor, which a level runs before lava's spread tick, so settling leaves that fluid out of vanilla's stone
- * recipe.
+ * recipe, and one on lava for a water neighbor, which a level answers with the interaction registered before it.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -33,6 +33,9 @@ public final class JeiAutoTestInteractions {
     static final List<Block> MERGE_NEIGHBORS = List.of(Blocks.HAY_BLOCK, Blocks.DRIED_KELP_BLOCK);
     static final List<Holder<FluidType>> MERGE_TYPES = List.of(NeoForgeMod.WATER_TYPE, NeoForgeMod.LAVA_TYPE);
     static final Block MERGE_RESULT = Blocks.MOSS_BLOCK;
+
+    /** What the lava interaction registered last writes, and a level never holds, because an earlier one answers first. */
+    static final Block PREEMPTED_RESULT = Blocks.BLACKSTONE;
 
     /** Results of the dev fluid's own lava interaction, one per source form, as a colored water mod registers them. */
     static final Block DYED_SOURCE_RESULT = Blocks.BLUE_TERRACOTTA;
@@ -94,6 +97,11 @@ public final class JeiAutoTestInteractions {
                         level.setBlock(relativePos,
                                 OFFSET_CONDITION.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true), Block.UPDATE_ALL);
                     }));
+            // Lava with water beside it, which the interaction registered on lava before this one answers first:
+            // every arrangement settles as that one's result, so this one's failure recipe says what stands there.
+            FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
+                    (level, pos, relativePos, state) -> level.getFluidState(relativePos).getFluidType() == NeoForgeMod.WATER_TYPE.value(),
+                    PREEMPTED_RESULT.defaultBlockState()));
         });
     }
 }

@@ -13,6 +13,7 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.sandbox.SandboxLevel;
 import com.mojang.logging.LogUtils;
 
@@ -104,7 +105,7 @@ public final class InteractionProber {
         List<Placement> stillCandidates = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
             FluidState still = fluid.defaultFluidState();
-            if (fluid == Fluids.EMPTY || !still.isSource()) {
+            if (fluid == Fluids.EMPTY || !still.isSource() || !FluidBlocks.hasBlock(fluid)) {
                 continue;
             }
             Placement source = Placement.ofFluid(still);
@@ -142,7 +143,7 @@ public final class InteractionProber {
      */
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
-        List<FluidType> types = orderedTypes(registered.keySet());
+        List<FluidType> types = probable(orderedTypes(registered.keySet()), registered);
 
         long start = System.nanoTime();
         Map<FluidType, List<FluidInteractionRecipe>> fromRegistry = new LinkedHashMap<>();
@@ -246,6 +247,29 @@ public final class InteractionProber {
         return result;
     }
 
+    /**
+     * The types worth probing: the ones a level can hold a fluid of. A type whose every fluid lacks a block can
+     * never stand anywhere, so nothing keyed on it can be exercised and none of its interactions is probed.
+     */
+    private static List<FluidType> probable(List<FluidType> types, Map<FluidType, List<InteractionInformation>> registered) {
+        List<FluidType> probable = new ArrayList<>(types.size());
+        int skippedTypes = 0;
+        int skippedInteractions = 0;
+        for (FluidType type : types) {
+            if (FluidBlocks.hasBlock(type)) {
+                probable.add(type);
+                continue;
+            }
+            int interactions = registered.getOrDefault(type, List.of()).size();
+            skippedTypes++;
+            skippedInteractions += interactions;
+            LOGGER.debug("Skipped {} fluid interaction(s) on {}, no fluid of which has a block", interactions, keyOf(type));
+        }
+        LOGGER.info("Skipped {} fluid interaction(s) on {} fluid type(s) whose fluids have no block",
+                skippedInteractions, skippedTypes);
+        return probable;
+    }
+
     /** Every fluid type that either has registered interactions or has a fluid to tick, in {@link #LOCATION_ORDER}. */
     private static List<FluidType> orderedTypes(Set<FluidType> registered) {
         Set<FluidType> types = new LinkedHashSet<>(registered);
@@ -297,6 +321,10 @@ public final class InteractionProber {
         boolean wroteFromPredicate = false;
         int hitCount = 0;
         int dropped = 0;
+        int preempted = 0;
+        Settler.Preemption first = null;
+        FluidState firstSource = null;
+        Placement firstNeighbor = null;
         for (FluidState source : sourceStates) {
             List<Hit> hits = new ArrayList<>();
             for (Placement candidate : fluidCandidates) {
@@ -329,6 +357,12 @@ public final class InteractionProber {
                 Settler.Outcome outcome = settler.settle(content, FluidInteractionRecipe.NEIGHBOR_OFFSET, wrote);
                 if (outcome.preempted() != null) {
                     dropped++;
+                    preempted++;
+                    if (first == null) {
+                        first = outcome.preempted();
+                        firstSource = source;
+                        firstNeighbor = neighbor;
+                    }
                     LOGGER.debug("A level pre-empts fluid interaction {}#{} (from {}) with {}: {}",
                             key, index, InteractionOwners.describe(owner),
                             neighbor != null ? neighbor.describe().getString() : "no neighbor", outcome.preempted());
@@ -355,13 +389,19 @@ public final class InteractionProber {
         }
 
         if (groups.isEmpty()) {
-            if (hitCount > 0) {
+            if (first != null) {
+                LOGGER.info("A level pre-empts {} of the {} arrangement(s) of fluid interaction {}#{} (from {}): {}",
+                        preempted, dropped, key, index, InteractionOwners.describe(owner), first);
+            } else if (hitCount > 0) {
                 LOGGER.info("A level settles every one of the {} arrangement(s) of fluid interaction {}#{} (from {}) "
                         + "without a result", dropped, key, index, InteractionOwners.describe(owner));
             }
             LOGGER.debug("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
+            Component reason = first != null
+                    ? Texts.preempted(firstSource, firstNeighbor, first.found(), first.wrote())
+                    : unable(type, owner);
             return new ProbedInteraction(index, owner,
-                    List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
+                    List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, reason, owner)));
         }
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>(groups.size());
@@ -520,11 +560,14 @@ public final class InteractionProber {
         return Optional.empty();
     }
 
-    /** Still fluids of the type, each in source form and, when flowing exists, a full-height flowing form. */
+    /**
+     * Still fluids of the type a level can hold, each in source form and, when flowing exists, a full-height
+     * flowing form.
+     */
     static List<FluidState> sourceStates(FluidType type) {
         List<FluidState> states = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
-            if (fluid.getFluidType() != type || fluid == Fluids.EMPTY) {
+            if (fluid.getFluidType() != type || fluid == Fluids.EMPTY || !FluidBlocks.hasBlock(fluid)) {
                 continue;
             }
             FluidState still = fluid.defaultFluidState();

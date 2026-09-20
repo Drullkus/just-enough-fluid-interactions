@@ -6,6 +6,19 @@ lava-over-water stone lives in `LavaFluid.spreadTo`, not the registry), and the 
 implement in their update hooks. All three are discovered by running them in a sandbox level, every hit is then
 settled in that sandbox with a real level's semantics, and the results are rendered as 3D scenes with Gander.
 
+## Language: ASD-STE100
+
+All writing must follow ASD-STE100, Simplified Technical English. This applies to text in the mod (lang strings,
+config comments, tooltips, failure texts), to documentation in the code (javadoc, comments, commit messages, this
+file), and to every message to the user, including agent reports and handoff notes. The rules that matter most:
+
+- Present tense and active voice. One topic per sentence. About 20 words or fewer per sentence.
+- No "would", "should", "could" or "might". Use "can" for possibility and "must" for requirements.
+- Use STE vocabulary where it exists: "occur", "change", "different", "not". Use concrete nouns (the fluid, the
+  block) and not abstractions (a level, a position, a write).
+- Keep the articles. Write two short sentences and not one sentence joined by "but".
+- Give agents a rendered example sentence, not a template.
+
 ## Versions
 
 - Minecraft 1.21.1, NeoForge 21.1.249, ModDevGradle 2.0.146, Gradle wrapper 9.2.1, Java toolchain 21.
@@ -18,7 +31,12 @@ settled in that sandbox with a real level's semantics, and the results are rende
   (its sugar water hardens through a `LiquidBlock` subclass's `neighborChanged`, the neighbor tier's fixture, and
   its honey crystal's `onPlace` rewrites adjacent water, the cascade fixture), DivineRPG (smoldering tar: a
   lava-tagged fluid with registry interactions and a `spreadTo` copied from vanilla, so it exercises the spread
-  tier, settling, and the sugar water case from above). They exist to feed the smoke test.
+  tier, settling, and the sugar water case from above), Biomes O' Plenty with GlitchCore and TerraBlender
+  (`localRuntime`; registers two interactions on every fluid type, one of them writing a block that depends on the
+  source state, and its blood and liquid null are lava-tagged, so it widens every lava-tagged alternative set,
+  adds registry recipes on other mods' fluid types, and supplies the first third-party pre-emption case: honey and
+  royal jelly, whose own block classes answer before the registry). They exist to feed the smoke test. WorldEdit
+  (`localRuntime`) is there for the user's convenience in the plain client.
   EMI (`maven.modrinth:emi`, version `emi_version` in `gradle.properties`, Modrinth's Maven in `build.gradle`) is a
   dependency of the `dev` source set alone, and only the `clientEmiTest` run launches with that source set's
   classpath (`runs.clientEmiTest.sourceSet`), which is what keeps EMI out of every other run; a per-run
@@ -39,7 +57,7 @@ settled in that sandbox with a real level's semantics, and the results are rende
 ## Agent workflow
 
 - Work happens on a task branch in its own worktree: one wrap-up commit, never `main`, never a push.
-- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the only `No probe of fluid interaction ... succeeded` line is the dev-only `minecraft:water#0` fallback (that line is debug-level, so it is in the dev run's `run/logs/debug.log` and not in `latest.log`, and is expected exactly once; the smoke test's `Smoke test recipe ... (from justenoughfluidinteractions): 0 source state(s)` line for the fallback recipe is the same evidence at info). Then `./gradlew runClientGroundTest` must report `0 mismatch(es)` and `./gradlew runClientEmiTest` the same recipe count as the JEI run.
+- "Compiles" is not "done." Before reporting a task complete: `./gradlew build`, then `./gradlew runClientJeiTest`, read the resulting screenshots, and check the run log for `Probed N fluid interaction(s)`, the absence of `Failed to bake`, and that the `No probe of fluid interaction ... succeeded` lines are only the expected ones (debug-level, so in the dev run's `run/logs/debug.log` and not in `latest.log`): the dev-only `minecraft:water#0` fallback, the dev-only pre-empted `minecraft:lava` fixture, and Biomes O' Plenty's interactions on `the_bumblezone:honey` and `the_bumblezone:royal_jelly` in both forms, six in all; the smoke test's `Smoke test recipe ... : 0 source state(s)` lines are the same evidence at info. Then `./gradlew runClientGroundTest` must report `0 mismatch(es)` and `./gradlew runClientEmiTest` the same recipe count as the JEI run.
 
 ## Credentials
 
@@ -79,7 +97,10 @@ Never read, print, or probe that file or those values.
   registers dev-only interactions and `JeiAutoTestFluids` two dev-only fluids: `hardening_brine` (hardens
   lava-tagged fluids below it in source form only) and `dyed_water` (no spread code of its own, water-tagged
   through `src/dev/resources/data/minecraft/tags/fluid/water.json` with `required: false`, since runs without the
-  test property never register it; it has its own interaction with lava beside it). A `Fluid` claims its registry
+  test property never register it; it has its own interaction with lava beside it, and another with a pointed
+  dripstone beside it that waterlogs the dripstone, the fixture for a fluid sharing a cell with an offset block).
+  `JeiAutoTestInteractions` also registers a lava interaction with a water neighbor that vanilla's earlier
+  lava-plus-water interaction pre-empts, the fixture for the pre-emption failure text. A `Fluid` claims its registry
   holder in its constructor, so dev fluids are built inside `RegisterEvent`, never statically. `build.gradle`
   declares the source set as `sourceSets { dev }`; naming `src/dev/java` or `src/dev/resources` again feeds every
   dev resource to `processDevResources` twice.
@@ -122,7 +143,22 @@ Never read, print, or probe that file or those values.
   `CollectingNeighborUpdater`, since Gander's has a chain limit of zero, then shape updates), and scheduled fluid
   ticks go to a queue drained by trigger time, priority and order on a virtual clock. Block scheduled ticks need a
   `ServerLevel` and are only counted; NeoForge's `NeighborNotifyEvent` is not fired; no block entities, entities
-  or random ticks. Bucket-only fluids are stored as a fluid state without a block.
+  or random ticks. The sandbox keeps a fluid state beside each block so it hands back exactly the state a tier
+  placed rather than what the legacy block round-trips to.
+- Fluids without a block never enter probing (`FluidBlocks.hasBlock`: a fluid whose default state's
+  `createLegacyBlock()` is air, a type none of whose fluids has one). Registry interactions keyed on such a type
+  are skipped with a debug line per type and one info summary, and every candidate list in every tier holds only
+  fluids with a block, so no recipe and no alternative can name a fluid a level cannot hold.
+- A registry interaction whose every settled arrangement is pre-empted becomes a failure recipe whose text states
+  the observation from the first pre-empted arrangement as two sentences
+  (`Texts.preempted`: source form, neighbor form, the block the interaction makes, the block the source changes
+  into in the world), such as "This interaction changes Lava next to Water into Blackstone. In the world, the Lava
+  changes into Obsidian." or, when the source is left as it was, "This interaction changes Honey Fluid next to
+  Blood into Flesh. In the world, the Honey Fluid does not change."; an interaction whose arrangements settle
+  without any result keeps "Unable to process". Both are failure recipes and `hideUnprocessable` hides both.
+- `SceneBakery` pushes and pops the pose around each block tesselation because vanilla's
+  `ModelBlockRenderer.tesselateBlock` translates by the block's random model offset without popping; the fluid
+  drawn at the same position afterwards must start from the unoffset pose.
 - `GuiGraphics.enableScissor` in 1.21.1 takes absolute GUI coordinates; the recipe widget's pose is translated to the
   widget origin, so read `pose.m30()/m31()` for the absolute position.
 - Everything in `scene/` runs on the render thread. Vertex buffers must be created and closed there.
@@ -211,11 +247,15 @@ line, one `Settled N arrangement(s) in T ms, reusing R already settled; B block 
 ...` line, and one `A level pre-empts ...` line per dropped alternative: in dev, both forms of `dyed_water` and of
 sugar water leave the stone recipe, both forms of sugar water leave the tar recipe, each logged twice because the
 inert re-probe settles them again), `Failed to bake`, and `No probe of fluid interaction ... succeeded`
-(debug-level, so it is in the dev run's `run/logs/debug.log`, not `latest.log`; expected once, for the dev
-fallback; any other is a regression). Per-interaction failure lines are debug so a large pack does not spam the
-production log; production users see failures only as "Unable to process" recipes and through the
-`hideUnprocessable` config. Expect one `Merged N fluid interaction recipe(s) into M` line from `RecipeMerger` and
-two info `Fluid spread form difference: ...` lines from `SpreadProber`, for the dev fluid and for DivineRPG's tar.
+(debug-level, so it is in the dev run's `run/logs/debug.log`, not `latest.log`; expected for the six interactions
+listed under "Agent workflow"; any other is a regression). Per-interaction failure lines are debug so a large pack
+does not spam the production log; production users see failures only as "Unable to process" recipes, or as the
+pre-emption observation, and through the `hideUnprocessable` config. Expect one `Skipped N fluid interaction(s) on
+M fluid type(s) whose fluids have no block` line (in dev BOP's interactions on milk and Create's potion and tea),
+one info `A level pre-empts N of the M arrangement(s) of fluid interaction ...` line per fully pre-empted
+interaction (the dev lava fixture, BOP's honey and royal jelly in both forms), one `Merged N fluid interaction
+recipe(s) into M` line from `RecipeMerger` and two info `Fluid spread form difference: ...` lines from
+`SpreadProber`, for the dev fluid and for DivineRPG's tar.
 The smoke test also logs one `Smoke test recipe ...` line per recipe with owner, source-state and neighbor
 counts, `... 0 offender(s)` for the duplicate-alternative check, one `Smoke test merged recipe ...` line proving
 both merge passes collapsed the dev-only mergeable interactions, one `Smoke test flowing neighbor ...` line
@@ -225,18 +265,25 @@ stone recipe precedes every third-party lava recipe, one `Smoke test form differ
 fluid's recipe carries the still form with the flowing form inert and names it in the tooltip text, one `Smoke
 test pre-empted ...` line proving `dyed_water` is absent from the stone recipe's alternatives while its own two
 recipes exist, one `Smoke test indicator ...` line proving the dev fluid's recipe shows the "!" on its source
-slot, four `Smoke test neighbor recipe ...` lines for sugar water's recipes (stone from the source form and
-cobblestone from the flowing form, beside and above), two `Smoke test neighbor pre-empted ...` lines proving sugar
-water is absent from the stone and tar spread recipes, one `Smoke test neighbor registry pre-empted ...` line
-proving lava is absent from sugar water's beside recipes and present in its above recipes, one `Smoke test own
-rule ...` line proving no recipe carries another rule's result, one `Smoke test cascade ...` line proving the
-honey recipe with still water above carries both the crystal and the sugar water the crystal writes (an `ERROR`
+slot, one `Smoke test neighbor recipe ...` line per sugar water neighbor recipe (the four hardening ones, stone
+from the source form and cobblestone from the flowing form, beside and above, plus the above-position ones BOP's
+blood and liquid null add; the checks find recipes by result, source form and neighbor offset, never by variant
+number or alternative count), two `Smoke test neighbor pre-empted ...` lines proving sugar water is absent from
+the stone and tar spread recipes, two `Smoke test neighbor registry pre-empted ...` lines, one per hardening
+result, proving lava is absent from sugar water's beside recipe and present in its above recipe and that the two
+differ by exactly lava's two forms, one `Smoke test own rule ...` line proving no recipe carries another rule's
+result, one `Smoke test cascade ...` line proving the honey recipe with still water above carries both the
+crystal and the sugar water the crystal writes, one `Smoke test pre-empted interaction ...` line quoting the dev
+lava fixture's failure text and one `Smoke test pre-empted third-party interaction ...` line quoting BOP's honey
+one, one `Smoke test offset recipe ...` line proving the dripstone condition is recorded waterlogged (an `ERROR`
 from any of these is a regression), and one `Smoke test recipe ids <sha-256>` line; that hash must not change
 between runs of the same checkout. The EMI run must log `EMI test found N recipe(s)` with the same N as the JEI
 run's recipe count, five `EMI test screenshot` lines, one `EMI test clicked the left scene ...` line and no
 `Exception adding JEMI extras`. The grounding run must log `Grounded N recipe alternative(s) of M recipe(s): 0
-mismatch(es)` (the dev fallback recipe is not grounded, and alternatives whose fluid has no block are skipped and
-counted in the `Ground test found ...` line) and no `Grounding mismatch` line. The stone, dev-fluid, sugar water
-and honey recipes get their own screenshots, `jei_fluid_interactions_spread.png`, `_form.png`, `_neighbor.png`
-and `_cascade.png`; the first should show lava directly over water then over stone, the last two output slots.
-Crop and enlarge screenshots with `sips` or PIL when a detail matters.
+mismatch(es)` (failure recipes are not grounded) with `0 of them holding a fluid no level can hold` in the
+`Ground test found ...` line, and no `Grounding mismatch` line. The stone, dev-fluid, sugar water, honey,
+pre-empted and offset recipes get their own screenshots, `jei_fluid_interactions_spread.png`, `_form.png`,
+`_neighbor.png`, `_cascade.png`, `_preempted.png` and `_offset.png`; the first should show lava directly over
+water then over stone, the cascade two output slots, the pre-empted one the source slot over the wrapped
+observation text, the offset one a grid-aligned water cube around the offset dripstone. Crop and enlarge
+screenshots with `sips` or PIL when a detail matters.

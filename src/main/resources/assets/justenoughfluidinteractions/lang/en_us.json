@@ -1,6 +1,10 @@
 {
   "jei.justenoughfluidinteractions.fluid_interactions": "Fluid Interactions",
   "jei.justenoughfluidinteractions.fluid_interactions.unable": "Unable to process for %s",
+  "jei.justenoughfluidinteractions.fluid_interactions.preempted": "This interaction would change %s next to %s into %s. However in the world, the %s changes into %s.",
+  "jei.justenoughfluidinteractions.fluid_interactions.preempted.unchanged": "This interaction would change %s next to %s into %s. However in the world, the %s does not change.",
+  "jei.justenoughfluidinteractions.fluid_interactions.preempted.alone": "This interaction would change %s into %s. However in the world, the %s changes into %s.",
+  "jei.justenoughfluidinteractions.fluid_interactions.preempted.alone.unchanged": "This interaction would change %s into %s. However in the world, the %s does not change.",
   "jei.justenoughfluidinteractions.fluid_interactions.form.source": "Source block",
   "jei.justenoughfluidinteractions.fluid_interactions.form.flowing": "Flowing",
   "jei.justenoughfluidinteractions.fluid_interactions.form.both": "Source or flowing",
