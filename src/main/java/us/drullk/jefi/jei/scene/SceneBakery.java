@@ -133,8 +133,16 @@ public final class SceneBakery {
                 long seed = state.getSeed(pos);
                 random.setSeed(seed);
                 for (RenderType type : model.getRenderTypes(state, random, modelData)) {
-                    modelRenderer.tesselateBlock(level, model, state, pos, pose, blocks.builder(type), true, random, seed,
-                            OverlayTexture.NO_OVERLAY, modelData, type);
+                    // tesselateBlock translates the pose for the block's model offset and never pops it, so each
+                    // call needs its own push/pop to keep that offset from leaking into the next render type or
+                    // into the fluid tesselated at the same position below.
+                    pose.pushPose();
+                    try {
+                        modelRenderer.tesselateBlock(level, model, state, pos, pose, blocks.builder(type), true, random, seed,
+                                OverlayTexture.NO_OVERLAY, modelData, type);
+                    } finally {
+                        pose.popPose();
+                    }
                 }
             }
             if (!fluidState.isEmpty()) {

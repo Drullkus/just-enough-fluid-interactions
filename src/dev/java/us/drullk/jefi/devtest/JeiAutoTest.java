@@ -33,6 +33,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
@@ -81,6 +82,7 @@ public final class JeiAutoTest {
     private static @Nullable FluidInteractionRecipe formRecipe;
     private static @Nullable FluidInteractionRecipe neighborRecipe;
     private static @Nullable FluidInteractionRecipe cascadeRecipe;
+    private static @Nullable FluidInteractionRecipe offsetRecipe;
 
     private JeiAutoTest() {
     }
@@ -127,6 +129,7 @@ public final class JeiAutoTest {
                     checkOwnRule(recipes);
                     checkIndicator();
                     checkCascade(recipes);
+                    checkOffsetRecipe(recipes);
                     logRecipeIds(recipes);
                     runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
                     phase = 3;
@@ -213,14 +216,28 @@ public final class JeiAutoTest {
                     if (cascadeRecipe != null) {
                         grab(mc, "cascade");
                     }
+                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+                    if (offsetRecipe != null && runtime != null) {
+                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+                        runtime.getRecipesGui().showRecipes(category, List.of(offsetRecipe), List.of());
+                    }
                     phase = 9;
-                    timer = 10;
+                    timer = 25;
                 }
             }
             case 9 -> {
                 if (--timer <= 0) {
-                    LOGGER.info("Smoke test finished, stopping the client");
+                    if (offsetRecipe != null) {
+                        grab(mc, "offset");
+                    }
                     phase = 10;
+                    timer = 10;
+                }
+            }
+            case 10 -> {
+                if (--timer <= 0) {
+                    LOGGER.info("Smoke test finished, stopping the client");
+                    phase = 11;
                     mc.stop();
                 }
             }
@@ -692,6 +709,35 @@ public final class JeiAutoTest {
         LOGGER.info("Smoke test cascade {} (from {}): neighbor {}, result(s) {}, neighbor alternative(s) {}",
                 recipe.id(), recipe.owner(), Texts.offset(recipe.neighborOffset()).getString(), describe(recipe.results()),
                 recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
+    }
+
+    /**
+     * The dripstone beside the dev fluid is the probed neighbor, so the interaction's own write at that offset
+     * waterlogs it in place; the write survives settling because it carries a fluid other than the one the
+     * arrangement poured, and it must carry {@link BlockStateProperties#WATERLOGGED} for the scene to draw a
+     * block whose model offset and fluid share one cell.
+     */
+    private static void checkOffsetRecipe(List<FluidInteractionRecipe> found) {
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> recipe.neighbors().stream().anyMatch(placement -> placement.block().is(JeiAutoTestInteractions.OFFSET_CONDITION)))
+                .toList();
+        if (matches.size() != 1) {
+            LOGGER.error("Smoke test expected one recipe with a {} condition, found {}",
+                    BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OFFSET_CONDITION), matches.size());
+            return;
+        }
+        FluidInteractionRecipe recipe = matches.getFirst();
+        BlockState written = recipe.results().get(recipe.neighborOffset());
+        if (written == null || !written.hasProperty(BlockStateProperties.WATERLOGGED) || !written.getValue(BlockStateProperties.WATERLOGGED)) {
+            LOGGER.error("Smoke test expected {} to write a waterlogged {} at {}, found {}",
+                    recipe.id(), BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OFFSET_CONDITION),
+                    Texts.offset(recipe.neighborOffset()).getString(), written);
+            return;
+        }
+        offsetRecipe = recipe;
+        LOGGER.info("Smoke test offset recipe {}: condition {}[waterlogged={}] at {}", recipe.id(),
+                BuiltInRegistries.BLOCK.getKey(written.getBlock()), written.getValue(BlockStateProperties.WATERLOGGED),
+                Texts.offset(recipe.neighborOffset()).getString());
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

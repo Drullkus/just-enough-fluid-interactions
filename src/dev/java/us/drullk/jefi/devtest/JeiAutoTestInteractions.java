@@ -7,6 +7,7 @@ import us.drullk.jefi.JustEnoughFluidInteractions;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -36,6 +37,11 @@ public final class JeiAutoTestInteractions {
     /** Results of the dev fluid's own lava interaction, one per source form, as a colored water mod registers them. */
     static final Block DYED_SOURCE_RESULT = Blocks.BLUE_TERRACOTTA;
     static final Block DYED_FLOWING_RESULT = Blocks.CYAN_TERRACOTTA;
+
+    /** Written at the source when the dev fluid waterlogs {@link #OFFSET_CONDITION} beside it. */
+    static final Block OFFSET_RESULT = Blocks.POLISHED_TUFF;
+    /** A waterloggable block whose {@code offsetType} is {@code XZ}, not {@code NONE} (checked against 1.21.1's {@code Blocks}). */
+    static final Block OFFSET_CONDITION = Blocks.POINTED_DRIPSTONE;
 
     private JeiAutoTestInteractions() {
     }
@@ -78,6 +84,16 @@ public final class JeiAutoTestInteractions {
                             MERGE_RESULT.defaultBlockState()));
                 }
             }
+            // The dev water-tagged fluid beside a pointed dripstone waterlogs it with plain water rather than
+            // itself: a random-offset block sharing its cell with a fluid, for the scene renderer, whose write a
+            // settled level keeps because the fluid it holds is not one the arrangement itself poured.
+            FluidInteractionRegistry.addInteraction(JeiAutoTestFluids.dyedType(), new InteractionInformation(
+                    (level, pos, relativePos, state) -> level.getBlockState(relativePos).is(OFFSET_CONDITION),
+                    (level, pos, relativePos, state) -> {
+                        level.setBlock(pos, OFFSET_RESULT.defaultBlockState(), Block.UPDATE_ALL);
+                        level.setBlock(relativePos,
+                                OFFSET_CONDITION.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true), Block.UPDATE_ALL);
+                    }));
         });
     }
 }
