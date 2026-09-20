@@ -152,10 +152,10 @@ Never read, print, or probe that file or those values.
 - A registry interaction whose every settled arrangement is pre-empted becomes a failure recipe whose text states
   the observation from the first pre-empted arrangement as two sentences
   (`Texts.preempted`: source form, neighbor form, the block the interaction makes, the block the source changes
-  into in the world), such as "This interaction changes Lava next to Water into Blackstone. In the world, the Lava
-  changes into Obsidian." or, when the source is left as it was, "This interaction changes Honey Fluid next to
-  Blood into Flesh. In the world, the Honey Fluid does not change."; an interaction whose arrangements settle
-  without any result keeps "Unable to process". Both are failure recipes and `hideUnprocessable` hides both.
+  into in the world), such as "This interaction would change Lava next to Water into Blackstone. However in the world,
+  the Lava changes into Obsidian." or, when the source is left as it was, "This interaction would change Honey
+  Fluid next to Blood into Flesh. However in the world, the Honey Fluid does not change."; an interaction whose
+  arrangements settle without any result keeps "Unable to process". Both are failure recipes and `hideUnprocessable` hides both.
 - `SceneBakery` pushes and pops the pose around each block tesselation because vanilla's
   `ModelBlockRenderer.tesselateBlock` translates by the block's random model offset without popping; the fluid
   drawn at the same position afterwards must start from the unoffset pose.
