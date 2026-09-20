@@ -85,13 +85,18 @@ Never read, print, or probe that file or those values.
 
 ## Source sets
 
-- `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages).
+- `src/main`: the mod. Plugin code under `us/drullk/jefi/jei/` (`probe`, `sandbox`, `scene` packages). In
+  `probe`, `InteractionProber` is only the coordinator: `probeAll` is the list of steps to read first.
+  `RegistryProber` is the registry tier. `RuleProber` is the base of `SpreadProber` and `NeighborProber`.
+  `Candidates` holds the candidate lists and `sourceStates(type)`. `RecipeIds` holds the orderings and the id
+  format. `SandboxLevel.ORIGIN` is where every tier puts the source.
 - `src/dev`: development-only classes bound to the mod for runs, never packaged. `JeiAutoTest` is gated by the
   system property `justenoughfluidinteractions.jeiautotest` (`clientJeiTest` run config), `EmiAutoTest` by
   `justenoughfluidinteractions.emiautotest` (`clientEmiTest`), `GroundAutoTest` by
   `justenoughfluidinteractions.groundtest` (`clientGroundTest`), and the fixtures below register under any of them
   (`AutoTestWorld.FIXTURES`). `AutoTestWorld` holds the world creation, onboarding dismissal and screenshot code
-  all three share; `EmiAutoTestSteps` holds every EMI reference, so no other run loads EMI classes; `GroundCheck`
+  all three share; `TickSteps` runs each test as a list of steps on the client tick, one step at a time;
+  `EmiAutoTestSteps` holds every EMI reference, so no other run loads EMI classes; `GroundCheck`
   builds one recipe alternative in a real level and compares it. The compile
   classpath extends `main`'s `compileOnly`, so the smoke test compiles against the same JEI as the mod. `JeiAutoTestInteractions`
   registers dev-only interactions and `JeiAutoTestFluids` two dev-only fluids: `hardening_brine` (hardens
@@ -200,8 +205,9 @@ Never read, print, or probe that file or those values.
   another channel's outcome and belongs to that channel's own recipe, so the alternative is dropped with a debug
   `A level pre-empts ...` line naming what stands there instead. Positions the level changed beyond the rule's
   writes, such as a result block rewriting a neighbor in its own `onPlace`, stay in the recipe as further results.
-  Settles are cached per arrangement, so two tiers proposing the same one get the same answer and the first tier's
-  attribution wins; the cross-tier dedup keys on the physical arrangement (sources, alternatives, neighbor offset,
+  Settling is deterministic, so two tiers proposing the same arrangement get the same answer and the first tier's
+  attribution wins; nothing is cached across tiers, and `RuleProber` keeps the settled result of every arrangement
+  of the type in progress so the inert check settles nothing twice. The cross-tier dedup keys on the physical arrangement (sources, alternatives, neighbor offset,
   conditions), never on results. `Fixtures` is shared with `GroundCheck`: bedrock under anything that would fall,
   and for every placement recorded flowing a still source of the same fluid on the side away from the
   arrangement, because a flowing fluid with nothing feeding it drains within a tick. Fixtures never enter a recipe.
@@ -223,7 +229,7 @@ Never read, print, or probe that file or those values.
   interactions, `justenoughfluidinteractions:spread/<type namespace>/<type path>/<owner>/<n>/<variant>` for
   spread-discovered ones and `justenoughfluidinteractions:neighbor/<type namespace>/<type path>/<owner>/<n>/<variant>`
   for update-hook ones, and must stay unique and stable across launches; JEI uses them for bookmarks. Fluid types
-  rank `minecraft`, `neoforge`, then other namespaces alphabetically, then path (`InteractionProber.LOCATION_ORDER`,
+  rank `minecraft`, `neoforge`, then other namespaces alphabetically, then path (`RecipeIds.LOCATION_ORDER`,
   never `ResourceLocation`'s path-first natural order). Within a type, registry interactions are grouped by owner in
   the same ranking and numbered (`n`) with successes first, then the result block's key, then registration index;
   spread recipes number `n` by target position (below, then beside), neighbor recipes by below, beside, above, and
@@ -235,7 +241,7 @@ Never read, print, or probe that file or those values.
   separate.
 - Never call `FlowingFluid.getFlowing(level, falling)` on modded fluids: some register flowing states without the
   `LEVEL` or `FALLING` property and `setValue` throws. Build the state with `defaultFluidState().trySetValue(...)`
-  as `InteractionProber` and `SceneArrangement` do.
+  as `Candidates` and `SceneArrangement` do.
 
 ## Verifying changes
 
@@ -243,10 +249,10 @@ Compile, then run the smoke test and read the screenshots. Check the log for `Pr
 `Probed fluid spread of N fluid type(s)` and `Probed fluid neighbors of N fluid type(s)` (`debug.log` adds one
 `Probed fluid spread of <type> ...` and one `Probed fluid neighbors of <type> ...` line per probed type, one
 `Skipped the fluid spread of N of M fluid type(s)` and one `Skipped the fluid neighbors of N of M fluid type(s)`
-line, one `Settled N arrangement(s) in T ms, reusing R already settled; B block scheduled tick(s) were asked for
-...` line, and one `A level pre-empts ...` line per dropped alternative: in dev, both forms of `dyed_water` and of
-sugar water leave the stone recipe, both forms of sugar water leave the tar recipe, each logged twice because the
-inert re-probe settles them again), `Failed to bake`, and `No probe of fluid interaction ... succeeded`
+line, one `Settled N arrangement(s) in T ms; B block scheduled tick(s) were asked for ...` line, and one `A level
+pre-empts ...` line per dropped alternative and source form: in dev, both forms of `dyed_water` and of sugar water
+leave the stone recipe, both forms of sugar water leave the tar recipe, each logged once for still lava and once
+for flowing lava), `Failed to bake`, and `No probe of fluid interaction ... succeeded`
 (debug-level, so it is in the dev run's `run/logs/debug.log`, not `latest.log`; expected for the six interactions
 listed under "Agent workflow"; any other is a regression). Per-interaction failure lines are debug so a large pack
 does not spam the production log; production users see failures only as "Unable to process" recipes, or as the

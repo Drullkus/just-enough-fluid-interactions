@@ -29,89 +29,64 @@ final class EmiAutoTestSteps {
     private static final String PREFIX = "EMI test";
     private static final int MAX_SHOTS = 4;
 
-    private static int phase;
-    private static int timer;
     private static int shot;
     private static List<EmiRecipe> recipes = List.of();
+
+    /**
+     * The test as a list of steps: enter the world, open the category, screenshot it and the first recipes,
+     * click the left scene of the recipe on screen, screenshot it turned, stop the client.
+     */
+    private static final TickSteps STEPS = new TickSteps()
+            .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
+            .until(mc -> mc.level != null && mc.player != null && mc.screen == null && category() != null, mc -> {
+                mc.options.guiScale().set(2);
+                mc.resizeDisplay();
+            })
+            .after(40, EmiAutoTestSteps::openCategory)
+            .after(30, mc -> {
+                LOGGER.info("{} showing the category page", PREFIX);
+                grab(mc, "category");
+            })
+            .repeat(25, EmiAutoTestSteps::nextRecipe)
+            .after(10, EmiAutoTestSteps::rotate)
+            .after(20, mc -> grab(mc, "rotated"))
+            .after(10, mc -> {
+                LOGGER.info("{} finished, stopping the client", PREFIX);
+                mc.stop();
+            });
 
     private EmiAutoTestSteps() {
     }
 
     static void tick(Minecraft mc) {
-        switch (phase) {
-            case 0 -> {
-                if (AutoTestWorld.atTitleScreen(mc)) {
-                    phase = 1;
-                    AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX);
-                }
-            }
-            case 1 -> {
-                if (mc.level != null && mc.player != null && mc.screen == null && category() != null) {
-                    mc.options.guiScale().set(2);
-                    mc.resizeDisplay();
-                    phase = 2;
-                    timer = 40;
-                }
-            }
-            case 2 -> {
-                if (--timer <= 0) {
-                    EmiRecipeCategory category = category();
-                    if (category == null) {
-                        LOGGER.error("{} found no EMI category for {}", PREFIX, FluidInteractionsJeiPlugin.TYPE.getUid());
-                        phase = 7;
-                        return;
-                    }
-                    recipes = order(EmiApi.getRecipeManager().getRecipes(category));
-                    LOGGER.info("{} found {} recipe(s) in category {}", PREFIX, recipes.size(), category.getId());
-                    EmiApi.displayRecipeCategory(category);
-                    phase = 3;
-                    timer = 30;
-                }
-            }
-            case 3 -> {
-                if (--timer <= 0) {
-                    if (shot == 0) {
-                        LOGGER.info("{} showing the category page", PREFIX);
-                        grab(mc, "category");
-                    } else {
-                        EmiRecipe shown = recipes.get(shot - 1);
-                        LOGGER.info("{} showing recipe {}", PREFIX, shown.getId());
-                        grab(mc, "recipe_" + shot);
-                    }
-                    shot++;
-                    if (shot >= MAX_SHOTS || shot > recipes.size()) {
-                        phase = 4;
-                        timer = 10;
-                        return;
-                    }
-                    EmiApi.displayRecipe(recipes.get(shot - 1));
-                    timer = 25;
-                }
-            }
-            case 4 -> {
-                if (--timer <= 0) {
-                    rotate(mc);
-                    phase = 5;
-                    timer = 20;
-                }
-            }
-            case 5 -> {
-                if (--timer <= 0) {
-                    grab(mc, "rotated");
-                    phase = 6;
-                    timer = 10;
-                }
-            }
-            case 6 -> {
-                if (--timer <= 0) {
-                    LOGGER.info("{} finished, stopping the client", PREFIX);
-                    phase = 7;
-                    mc.stop();
-                }
-            }
-            default -> {
-            }
+        STEPS.tick(mc);
+    }
+
+    private static void openCategory(Minecraft mc) {
+        EmiRecipeCategory category = category();
+        if (category == null) {
+            LOGGER.error("{} found no EMI category for {}", PREFIX, FluidInteractionsJeiPlugin.TYPE.getUid());
+            STEPS.stop();
+            return;
         }
+        recipes = order(EmiApi.getRecipeManager().getRecipes(category));
+        LOGGER.info("{} found {} recipe(s) in category {}", PREFIX, recipes.size(), category.getId());
+        EmiApi.displayRecipeCategory(category);
+    }
+
+    /** Screenshots the recipe on screen, then shows the next one. False once every recipe is shot. */
+    private static boolean nextRecipe(Minecraft mc) {
+        if (shot > 0) {
+            EmiRecipe shown = recipes.get(shot - 1);
+            LOGGER.info("{} showing recipe {}", PREFIX, shown.getId());
+            grab(mc, "recipe_" + shot);
+        }
+        shot++;
+        if (shot >= MAX_SHOTS || shot > recipes.size()) {
+            return false;
+        }
+        EmiApi.displayRecipe(recipes.get(shot - 1));
+        return true;
     }
 
     /**

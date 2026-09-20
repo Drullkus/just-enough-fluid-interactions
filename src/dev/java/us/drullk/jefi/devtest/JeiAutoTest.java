@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -21,10 +22,9 @@ import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.InertFormIndicator;
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
-import us.drullk.jefi.jei.probe.InteractionProber;
-import us.drullk.jefi.jei.probe.NeighborProber;
 import us.drullk.jefi.jei.probe.Placement;
-import us.drullk.jefi.jei.probe.SpreadProber;
+import us.drullk.jefi.jei.probe.RecipeIds;
+import us.drullk.jefi.jei.probe.RuleProber;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -85,8 +85,6 @@ public final class JeiAutoTest {
             ResourceLocation.fromNamespaceAndPath(BOP, "flesh"),
             ResourceLocation.fromNamespaceAndPath(BOP, "porous_flesh"));
 
-    private static int phase;
-    private static int timer;
     private static int shot;
     private static List<FluidInteractionRecipe> recipes = List.of();
     private static @Nullable FluidInteractionRecipe spreadRecipe;
@@ -96,181 +94,129 @@ public final class JeiAutoTest {
     private static @Nullable FluidInteractionRecipe offsetRecipe;
     private static @Nullable FluidInteractionRecipe preemptedRecipe;
 
+    /** The recipes that get a screenshot of their own, in this order. Each is read when its step runs. */
+    private static final List<Shot> SHOTS = List.of(
+            new Shot("spread", () -> spreadRecipe),
+            new Shot("form", () -> formRecipe),
+            new Shot("neighbor", () -> neighborRecipe),
+            new Shot("cascade", () -> cascadeRecipe),
+            new Shot("offset", () -> offsetRecipe),
+            new Shot("preempted", () -> preemptedRecipe));
+
+    private static final TickSteps STEPS = steps();
+
     private JeiAutoTest() {
+    }
+
+    private record Shot(String name, Supplier<@Nullable FluidInteractionRecipe> recipe) {
+    }
+
+    /**
+     * The test as a list of steps: enter the world, read and check the recipes, screenshot the category and its
+     * pages, screenshot each recipe of {@link #SHOTS}, stop the client.
+     */
+    private static TickSteps steps() {
+        TickSteps steps = new TickSteps()
+                .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
+                .until(JeiAutoTest::inWorld, JeiAutoTest::setGuiScale)
+                .after(40, JeiAutoTest::inspectRecipes)
+                .after(30, mc -> grab(mc, "category"))
+                .repeat(25, JeiAutoTest::nextPage)
+                .after(10, mc -> show(SHOTS.getFirst()));
+        for (int i = 0; i < SHOTS.size(); i++) {
+            Shot shot = SHOTS.get(i);
+            Shot next = i + 1 < SHOTS.size() ? SHOTS.get(i + 1) : null;
+            steps.after(25, mc -> {
+                grab(mc, shot);
+                if (next != null) {
+                    show(next);
+                }
+            });
+        }
+        return steps.after(10, mc -> {
+            LOGGER.info("Smoke test finished, stopping the client");
+            mc.stop();
+        });
     }
 
     @SubscribeEvent
     static void onClientTick(ClientTickEvent.Post event) {
-        if (!ENABLED) {
+        if (ENABLED) {
+            STEPS.tick(Minecraft.getInstance());
+        }
+    }
+
+    private static boolean inWorld(Minecraft mc) {
+        return mc.level != null && mc.player != null && mc.screen == null && FluidInteractionsJeiPlugin.runtime() != null;
+    }
+
+    private static void setGuiScale(Minecraft mc) {
+        mc.options.guiScale().set(2);
+        mc.resizeDisplay();
+    }
+
+    /** Reads the probed recipes from JEI, runs every check on them, and opens the category. */
+    private static void inspectRecipes(Minecraft mc) {
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (runtime == null) {
+            LOGGER.error("JEI runtime disappeared before the smoke test could open its category");
+            STEPS.stop();
+            mc.stop();
             return;
         }
-        Minecraft mc = Minecraft.getInstance();
-        switch (phase) {
-            case 0 -> {
-                if (AutoTestWorld.atTitleScreen(mc)) {
-                    phase = 1;
-                    AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX);
-                }
-            }
-            case 1 -> {
-                if (mc.level != null && mc.player != null && mc.screen == null && FluidInteractionsJeiPlugin.runtime() != null) {
-                    mc.options.guiScale().set(2);
-                    mc.resizeDisplay();
-                    phase = 2;
-                    timer = 40;
-                }
-            }
-            case 2 -> {
-                if (--timer <= 0) {
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (runtime == null) {
-                        LOGGER.error("JEI runtime disappeared before the smoke test could open its category");
-                        mc.stop();
-                        return;
-                    }
-                    recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
-                    LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
-                    checkAlternatives(recipes);
-                    checkMerging(recipes);
-                    checkFlowingNeighbor(recipes);
-                    checkSpreadRecipe(recipes);
-                    checkOwnerOrder(recipes);
-                    checkFormDifference(recipes);
-                    checkPreempted(recipes);
-                    checkNeighborRecipe(recipes);
-                    checkOwnRule(recipes);
-                    checkIndicator();
-                    checkCascade(recipes);
-                    checkOffsetRecipe(recipes);
-                    checkPreemptedInteraction(recipes);
-                    checkPreemptedThirdPartyInteraction(recipes);
-                    logRecipeIds(recipes);
-                    runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
-                    phase = 3;
-                    timer = 30;
-                }
-            }
-            case 3 -> {
-                if (--timer <= 0) {
-                    grab(mc, shot == 0 ? "category" : "recipes_" + shot);
-                    int from = shot * RECIPES_PER_SHOT;
-                    shot++;
-                    if (shot >= MAX_SHOTS || from >= recipes.size()) {
-                        phase = 4;
-                        timer = 10;
-                        return;
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (runtime == null) {
-                        phase = 4;
-                        timer = 10;
-                        return;
-                    }
-                    IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                    List<FluidInteractionRecipe> page = recipes.subList(from, Math.min(from + RECIPES_PER_SHOT, recipes.size()));
-                    runtime.getRecipesGui().showRecipes(category, page, List.of());
-                    timer = 25;
-                }
-            }
-            case 4 -> {
-                if (--timer <= 0) {
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (spreadRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(spreadRecipe), List.of());
-                    }
-                    phase = 5;
-                    timer = 25;
-                }
-            }
-            case 5 -> {
-                if (--timer <= 0) {
-                    if (spreadRecipe != null) {
-                        grab(mc, "spread");
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (formRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(formRecipe), List.of());
-                    }
-                    phase = 6;
-                    timer = 25;
-                }
-            }
-            case 6 -> {
-                if (--timer <= 0) {
-                    if (formRecipe != null) {
-                        grab(mc, "form");
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (neighborRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(neighborRecipe), List.of());
-                    }
-                    phase = 7;
-                    timer = 25;
-                }
-            }
-            case 7 -> {
-                if (--timer <= 0) {
-                    if (neighborRecipe != null) {
-                        grab(mc, "neighbor");
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (cascadeRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(cascadeRecipe), List.of());
-                    }
-                    phase = 8;
-                    timer = 25;
-                }
-            }
-            case 8 -> {
-                if (--timer <= 0) {
-                    if (cascadeRecipe != null) {
-                        grab(mc, "cascade");
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (offsetRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(offsetRecipe), List.of());
-                    }
-                    phase = 9;
-                    timer = 25;
-                }
-            }
-            case 9 -> {
-                if (--timer <= 0) {
-                    if (offsetRecipe != null) {
-                        grab(mc, "offset");
-                    }
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (preemptedRecipe != null && runtime != null) {
-                        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
-                        runtime.getRecipesGui().showRecipes(category, List.of(preemptedRecipe), List.of());
-                    }
-                    phase = 10;
-                    timer = 25;
-                }
-            }
-            case 10 -> {
-                if (--timer <= 0) {
-                    if (preemptedRecipe != null) {
-                        grab(mc, "preempted");
-                    }
-                    phase = 11;
-                    timer = 10;
-                }
-            }
-            case 11 -> {
-                if (--timer <= 0) {
-                    LOGGER.info("Smoke test finished, stopping the client");
-                    phase = 12;
-                    mc.stop();
-                }
-            }
-            default -> {
-            }
+        recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
+        LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
+        checkAlternatives(recipes);
+        checkMerging(recipes);
+        checkFlowingNeighbor(recipes);
+        checkSpreadRecipe(recipes);
+        checkOwnerOrder(recipes);
+        checkFormDifference(recipes);
+        checkPreempted(recipes);
+        checkNeighborRecipe(recipes);
+        checkOwnRule(recipes);
+        checkIndicator();
+        checkCascade(recipes);
+        checkOffsetRecipe(recipes);
+        checkPreemptedInteraction(recipes);
+        checkPreemptedThirdPartyInteraction(recipes);
+        logRecipeIds(recipes);
+        runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
+    }
+
+    /** Screenshots the page on screen, then shows the next page of recipes. False once every page is shot. */
+    private static boolean nextPage(Minecraft mc) {
+        if (shot > 0) {
+            grab(mc, "recipes_" + shot);
+        }
+        int from = shot * RECIPES_PER_SHOT;
+        shot++;
+        if (shot >= MAX_SHOTS || from >= recipes.size()) {
+            return false;
+        }
+        show(recipes.subList(from, Math.min(from + RECIPES_PER_SHOT, recipes.size())));
+        return true;
+    }
+
+    private static void show(Shot shot) {
+        FluidInteractionRecipe recipe = shot.recipe().get();
+        if (recipe != null) {
+            show(List.of(recipe));
+        }
+    }
+
+    private static void show(List<FluidInteractionRecipe> page) {
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (runtime == null) {
+            return;
+        }
+        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+        runtime.getRecipesGui().showRecipes(category, page, List.of());
+    }
+
+    private static void grab(Minecraft mc, Shot shot) {
+        if (shot.recipe().get() != null) {
+            grab(mc, shot.name());
         }
     }
 
@@ -362,8 +308,8 @@ public final class JeiAutoTest {
     private static void checkSpreadRecipe(List<FluidInteractionRecipe> found) {
         BlockState stone = Blocks.STONE.defaultBlockState();
         List<FluidInteractionRecipe> matches = found.stream()
-                .filter(recipe -> recipe.neighborOffset().equals(SpreadProber.BELOW_OFFSET))
-                .filter(recipe -> stone.equals(recipe.results().get(SpreadProber.BELOW_OFFSET)))
+                .filter(recipe -> recipe.neighborOffset().equals(RuleProber.BELOW_OFFSET))
+                .filter(recipe -> stone.equals(recipe.results().get(RuleProber.BELOW_OFFSET)))
                 .filter(recipe -> recipe.sourceFluids().contains(Fluids.LAVA))
                 .toList();
         if (matches.size() != 1) {
@@ -383,7 +329,7 @@ public final class JeiAutoTest {
         }
         LOGGER.info("Smoke test spread recipe {} (from {}): {} source state(s), {} at {}, neighbor alternative(s) {}",
                 stoneRecipe.id(), stoneRecipe.owner(), stoneRecipe.sources().size(),
-                BuiltInRegistries.BLOCK.getKey(stone.getBlock()), SpreadProber.BELOW_OFFSET.toShortString(),
+                BuiltInRegistries.BLOCK.getKey(stone.getBlock()), RuleProber.BELOW_OFFSET.toShortString(),
                 stoneRecipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
     }
 
@@ -399,7 +345,7 @@ public final class JeiAutoTest {
         }
         int stone = found.indexOf(spreadRecipe);
         List<FluidInteractionRecipe> thirdParty = found.stream()
-                .filter(recipe -> LAVA_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> LAVA_TYPE.equals(RecipeIds.keyOf(recipe.sourceType())))
                 .filter(recipe -> !"minecraft".equals(recipe.owner()) && !"neoforge".equals(recipe.owner()))
                 .toList();
         if (thirdParty.isEmpty()) {
@@ -526,7 +472,7 @@ public final class JeiAutoTest {
         }
 
         for (Map.Entry<ResourceLocation, Boolean> hardening : Map.of(SUGAR_INFUSED_STONE, false, SUGAR_INFUSED_COBBLESTONE, true).entrySet()) {
-            FluidInteractionRecipe above = hardened(matches, NeighborProber.ABOVE_OFFSET, hardening.getKey(), hardening.getValue());
+            FluidInteractionRecipe above = hardened(matches, RuleProber.ABOVE_OFFSET, hardening.getKey(), hardening.getValue());
             FluidInteractionRecipe beside = hardened(matches, FluidInteractionRecipe.NEIGHBOR_OFFSET, hardening.getKey(), hardening.getValue());
             if (above != null && SUGAR_INFUSED_STONE.equals(hardening.getKey())) {
                 neighborRecipe = above;
@@ -812,7 +758,7 @@ public final class JeiAutoTest {
     private static void checkPreemptedInteraction(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
                 .filter(FluidInteractionRecipe::isFailure)
-                .filter(recipe -> LAVA_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> LAVA_TYPE.equals(RecipeIds.keyOf(recipe.sourceType())))
                 .filter(recipe -> JustEnoughFluidInteractions.MODID.equals(recipe.owner()))
                 .toList();
         if (matches.size() != 1) {
@@ -845,7 +791,7 @@ public final class JeiAutoTest {
         String blood = fluidName(BLOOD);
         List<FluidInteractionRecipe> matches = found.stream()
                 .filter(FluidInteractionRecipe::isFailure)
-                .filter(recipe -> HONEY_TYPE.equals(InteractionProber.keyOf(recipe.sourceType())))
+                .filter(recipe -> HONEY_TYPE.equals(RecipeIds.keyOf(recipe.sourceType())))
                 .filter(recipe -> BOP.equals(recipe.owner()))
                 .filter(recipe -> failureText(recipe).contains(blood))
                 .toList();

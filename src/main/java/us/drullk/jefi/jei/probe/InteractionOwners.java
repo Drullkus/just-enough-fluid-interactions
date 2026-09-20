@@ -75,32 +75,23 @@ public final class InteractionOwners {
         return evidence.classes.isEmpty() ? null : evidence.classes.iterator().next();
     }
 
-    /**
-     * The mod credited with a fluid's own behaviour, for rules that live in its class rather than in the
-     * interaction registry: the class evidence a lambda would give, then the fluid's registry namespace.
-     */
+    /** The mod credited with the own behavior of a fluid, for a rule in the fluid's class. */
     public static @Nullable String ofFluid(Fluid fluid) {
-        String byClass = modOf(fluid.getClass());
-        if (byClass != null && isThirdParty(byClass)) {
-            return byClass;
-        }
-        String namespace = namespaceOfKey(BuiltInRegistries.FLUID.getKey(fluid));
-        if (namespace != null && isThirdParty(namespace)) {
-            return namespace;
-        }
-        return byClass != null ? byClass : namespace;
+        return ofRegistered(fluid.getClass(), BuiltInRegistries.FLUID.getKey(fluid));
     }
 
-    /**
-     * The mod credited with a block's own behaviour, for rules that live in a liquid block's update hooks: the
-     * class evidence a lambda would give, then the block's registry namespace.
-     */
+    /** The mod credited with the own behavior of a block, for a rule in the update hooks of a liquid block. */
     public static @Nullable String ofBlock(Block block) {
-        String byClass = modOf(block.getClass());
+        return ofRegistered(block.getClass(), BuiltInRegistries.BLOCK.getKey(block));
+    }
+
+    /** The class evidence a lambda gives, then the registry namespace; a third-party mod wins over either. */
+    private static @Nullable String ofRegistered(Class<?> clazz, @Nullable ResourceLocation key) {
+        String byClass = modOf(clazz);
         if (byClass != null && isThirdParty(byClass)) {
             return byClass;
         }
-        String namespace = namespaceOfKey(BuiltInRegistries.BLOCK.getKey(block));
+        String namespace = namespaceOfKey(key);
         if (namespace != null && isThirdParty(namespace)) {
             return namespace;
         }

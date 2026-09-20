@@ -31,7 +31,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  * still fluid plus the forms each was matched in, so the exact flowing state a probe recorded never decides a
  * merge. Failure recipes never merge.
  *
- * <p>A merged recipe keeps the id, source type and index of its first member in probe order. Probe order ranks
+ * <p>A merged recipe keeps the id and source type of its first member in probe order. Probe order ranks
  * the source fluid type by namespace ({@code minecraft}, then {@code neoforge}, then everything else
  * alphabetically) and then by path; within one type it ranks owner groups the same way (null owner last) and,
  * within one owner group, orders successes before failures, then by the result block at the source position
@@ -157,7 +157,7 @@ public final class RecipeMerger {
             }
             inertSources.removeAll(sources);
             inertNeighbors.removeAll(neighbors);
-            return new FluidInteractionRecipe(first.sourceType(), first.index(), first.id(),
+            return new FluidInteractionRecipe(first.sourceType(), first.id(),
                     List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
                     first.conditions(), first.results(), null, first.owner(),
                     new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)));

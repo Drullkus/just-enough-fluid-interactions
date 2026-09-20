@@ -79,9 +79,6 @@ public final class GroundAutoTest {
 
     private static final ResourceLocation SUGAR_WATER = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "sugar_water");
 
-    private static int phase;
-    private static int timer;
-
     private static volatile @Nullable List<GroundCheck.Alternative> queue;
     private static volatile boolean finished;
 
@@ -97,6 +94,16 @@ public final class GroundAutoTest {
     private static Set<ChunkPos> forced = Set.of();
     private static boolean casesInFlight;
 
+    /** The client side: enter the world, read the probed recipes, wait for the server side, stop the client. */
+    private static final TickSteps STEPS = new TickSteps()
+            .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
+            .until(mc -> mc.level != null && mc.player != null && mc.screen == null && FluidInteractionsJeiPlugin.runtime() != null)
+            .after(40, GroundAutoTest::readRecipes)
+            .until(mc -> finished, mc -> {
+                LOGGER.info("{} finished, stopping the client", PREFIX);
+                mc.stop();
+            });
+
     private GroundAutoTest() {
     }
 
@@ -106,47 +113,19 @@ public final class GroundAutoTest {
 
     @SubscribeEvent
     static void onClientTick(ClientTickEvent.Post event) {
-        if (!ENABLED) {
+        if (ENABLED) {
+            STEPS.tick(Minecraft.getInstance());
+        }
+    }
+
+    private static void readRecipes(Minecraft mc) {
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (runtime == null) {
+            LOGGER.error("{} lost the JEI runtime before it could read the probed recipes", PREFIX);
+            STEPS.stop();
             return;
         }
-        Minecraft mc = Minecraft.getInstance();
-        switch (phase) {
-            case 0 -> {
-                if (AutoTestWorld.atTitleScreen(mc)) {
-                    phase = 1;
-                    AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX);
-                }
-            }
-            case 1 -> {
-                if (mc.level != null && mc.player != null && mc.screen == null && FluidInteractionsJeiPlugin.runtime() != null) {
-                    phase = 2;
-                    timer = 40;
-                }
-            }
-            case 2 -> {
-                if (--timer <= 0) {
-                    IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
-                    if (runtime == null) {
-                        LOGGER.error("{} lost the JEI runtime before it could read the probed recipes", PREFIX);
-                        phase = 4;
-                        return;
-                    }
-                    List<FluidInteractionRecipe> recipes = runtime.getRecipeManager()
-                            .createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
-                    start(recipes);
-                    phase = 3;
-                }
-            }
-            case 3 -> {
-                if (finished) {
-                    LOGGER.info("{} finished, stopping the client", PREFIX);
-                    phase = 4;
-                    mc.stop();
-                }
-            }
-            default -> {
-            }
-        }
+        start(runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList());
     }
 
     private static void start(List<FluidInteractionRecipe> recipes) {

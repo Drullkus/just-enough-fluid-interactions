@@ -1,0 +1,99 @@
+package us.drullk.jefi.jei.probe;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.jetbrains.annotations.Nullable;
+
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FlowingFluid;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidType;
+
+/**
+ * What the tiers put beside a source: every fluid a level can hold, and the default state of every block.
+ *
+ * <p>A fluid without a block of its own is in no list ({@link FluidBlocks#hasBlock}). A liquid block and a block
+ * that holds a fluid state are in no block list, because the fluids are the candidates for those positions.
+ */
+final class Candidates {
+    /** Every fluid, in still form and then, when it has one, in a full flowing form. */
+    final List<Placement> fluids;
+    /** The default state of every block that holds no fluid. */
+    final List<Placement> blocks;
+    /** The still form of every fluid, then the blocks: what the multi-position search of the registry tier tries. */
+    final List<Placement> stillFluidsAndBlocks;
+
+    Candidates() {
+        List<Placement> fluids = new ArrayList<>();
+        List<Placement> stillFluids = new ArrayList<>();
+        for (Fluid fluid : BuiltInRegistries.FLUID) {
+            FluidState still = fluid.defaultFluidState();
+            if (fluid == Fluids.EMPTY || !still.isSource() || !FluidBlocks.hasBlock(fluid)) {
+                continue;
+            }
+            Placement source = Placement.ofFluid(still);
+            stillFluids.add(source);
+            fluids.add(source);
+            FluidState flow = flowingForm(fluid);
+            if (flow != null) {
+                fluids.add(Placement.ofFluid(flow));
+            }
+        }
+        List<Placement> blocks = new ArrayList<>();
+        for (Block block : BuiltInRegistries.BLOCK) {
+            BlockState state = block.defaultBlockState();
+            if (!state.isAir() && !(block instanceof LiquidBlock) && state.getFluidState().isEmpty()) {
+                blocks.add(Placement.ofBlock(state));
+            }
+        }
+        List<Placement> search = new ArrayList<>(stillFluids.size() + blocks.size());
+        search.addAll(stillFluids);
+        search.addAll(blocks);
+        this.fluids = List.copyOf(fluids);
+        this.blocks = List.copyOf(blocks);
+        this.stillFluidsAndBlocks = List.copyOf(search);
+    }
+
+    /**
+     * The states of one type a tier probes as the source: each still fluid with a block, and its full flowing
+     * form when it has one.
+     */
+    static List<FluidState> sourceStates(FluidType type) {
+        List<FluidState> states = new ArrayList<>();
+        for (Fluid fluid : BuiltInRegistries.FLUID) {
+            if (fluid.getFluidType() != type || fluid == Fluids.EMPTY || !FluidBlocks.hasBlock(fluid)) {
+                continue;
+            }
+            FluidState still = fluid.defaultFluidState();
+            if (!still.isSource()) {
+                continue;
+            }
+            states.add(still);
+            FluidState flow = flowingForm(fluid);
+            if (flow != null) {
+                states.add(flow);
+            }
+        }
+        return states;
+    }
+
+    /**
+     * A full flowing state of a still fluid, or null when it has none. Some modded fluids register a flowing
+     * fluid without the level properties, so the state is only narrowed with {@code trySetValue}.
+     */
+    static @Nullable FluidState flowingForm(Fluid fluid) {
+        if (!(fluid instanceof FlowingFluid flowing)) {
+            return null;
+        }
+        FluidState flow = flowing.getFlowing().defaultFluidState()
+                .trySetValue(FlowingFluid.LEVEL, 7)
+                .trySetValue(FlowingFluid.FALLING, false);
+        return !flow.isEmpty() && !flow.isSource() ? flow : null;
+    }
+}

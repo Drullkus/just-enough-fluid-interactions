@@ -22,8 +22,6 @@ import net.neoforged.neoforge.fluids.FluidType;
  * records that the interaction exists but could not be exercised.
  *
  * @param sourceType     the fluid type the interaction is registered against
- * @param index          the interaction's index within that type's registration list, or -1 when the recipe was
- *                       discovered by spread simulation rather than from the registry
  * @param id             a stable unique id for bookmarks and JEI's recipe lookups
  * @param sources        source fluid states that produced this exact outcome (source and/or flowing forms)
  * @param neighbors      alternatives for the tested neighbor position; any one of them triggers the interaction
@@ -38,7 +36,6 @@ import net.neoforged.neoforge.fluids.FluidType;
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
-        int index,
         ResourceLocation id,
         List<FluidState> sources,
         List<Placement> neighbors,
@@ -52,8 +49,8 @@ public record FluidInteractionRecipe(
     /** The neighbor position handed to registered interactions when probing, relative to the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
 
-    public static FluidInteractionRecipe failed(FluidType type, int index, ResourceLocation id, Component reason, @Nullable String owner) {
-        return new FluidInteractionRecipe(type, index, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner, InertForms.NONE);
+    public static FluidInteractionRecipe failed(FluidType type, ResourceLocation id, Component reason, @Nullable String owner) {
+        return new FluidInteractionRecipe(type, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner, InertForms.NONE);
     }
 
     public boolean isFailure() {

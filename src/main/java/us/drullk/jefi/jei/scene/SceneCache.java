@@ -11,7 +11,6 @@ import org.joml.Vector3f;
 import org.slf4j.Logger;
 
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
-import us.drullk.jefi.jei.probe.InteractionProber;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.sandbox.SandboxLevel;
 import com.mojang.blaze3d.vertex.VertexBuffer;
@@ -69,7 +68,7 @@ public final class SceneCache {
                 level = new SandboxLevel(access);
             }
             Map<BlockPos, Placement> placements = new LinkedHashMap<>();
-            SceneArrangement.of(recipe, variant).forEach((offset, placement) -> placements.put(InteractionProber.ORIGIN.offset(offset), placement));
+            SceneArrangement.of(recipe, variant).forEach((offset, placement) -> placements.put(SandboxLevel.ORIGIN.offset(offset), placement));
             if (placements.isEmpty()) {
                 return Optional.empty();
             }

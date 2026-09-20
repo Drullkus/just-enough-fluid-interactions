@@ -3,7 +3,6 @@ package us.drullk.jefi.jei.probe;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,57 +18,56 @@ import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 
 /**
- * Works out what a level does with one arrangement by building it in the sandbox with real level semantics and
- * letting it run to rest.
+ * Finds what a level does with one arrangement: builds it in the live sandbox and lets it come to rest.
  *
- * <p>The probe tiers are candidate generators: each one calls a single rule by hand and asks whether that rule
- * writes anything, which says an arrangement is worth looking at and which interaction or fluid owns it. What the
- * arrangement then produces is never only that rule's writes, because a level runs every channel — the
- * placement's {@code onPlace}, the neighbour updates it sends, the interaction registry the updated liquid blocks
- * run, and the fluids' own scheduled ticks, in that order and with everything each of those sets off. Settling
- * here runs all of them, so the ordering between channels comes out of the simulation instead of being modelled
- * by hand.
+ * <p>A probe tier calls one rule by hand and asks whether that rule writes anything. That says the arrangement
+ * is worth a look and which rule owns it. What the arrangement produces is never only that rule's writes,
+ * because a level runs every channel: the {@code onPlace} of the placement, the neighbor updates it sends, the
+ * interaction registry the updated liquid blocks run, and the scheduled ticks of the fluids, in that order and
+ * with everything each of them sets off. The settle step runs all of them, so the order of the channels comes
+ * out of the simulation.
  *
- * <p>An arrangement answers for the rule that proposed it and for no other. That holds only while the settled
- * level agrees with what the proposing rule wrote by hand: at every position that rule wrote, the settled state
- * is either the same block state or, where the rule wrote a fluid, the same still fluid whatever its level.
- * Anything else there is another channel's outcome, which belongs to whichever rule owns it and to that rule's
- * own recipe, so the arrangement is dropped for the tier that proposed it. What a level adds beyond those
- * positions — a result block changing something of its own as it is placed — is part of the answer.
+ * <p>An arrangement answers for the rule that proposed it and for no other rule. That holds only while the
+ * settled level agrees with what the rule wrote by hand: at every position the rule wrote, the settled state is
+ * the same block state or, where the rule wrote a fluid, the same still fluid at any level. Anything different
+ * there is the outcome of a different channel, which belongs to that channel's own recipe, so the arrangement is
+ * dropped for the tier that proposed it. What the level adds beyond those positions, such as a result block that
+ * changes a neighbor as it is placed, is part of the answer.
  *
  * <p>The arrangement is placed the way {@code GroundCheck} places it in a real level: {@link Fixtures} first,
- * then the content, with the source last, because a level runs the hooks of the block being placed before it
- * tells that block's neighbours anything, and the fluid placed last is the one every tier probes as its source.
+ * then the content, the source last. A level runs the hooks of the placed block before it notifies the
+ * neighbors, and the fluid placed last is the one every tier probes as its source.
  *
- * <p>The answer is the diff over the arrangement's own content positions together with the positions the
- * proposing rule wrote in. Fixtures and wherever the fluids flowed to are not part of the question a recipe asks,
- * and a position is only a result when its final state is something other than air, other than what was put
- * there, and other than a state of a fluid the arrangement itself poured — a spreading fluid arriving somewhere
- * is not a transformation.
+ * <p>The answer is the diff over the content positions and the positions the rule wrote in. Fixtures and the
+ * positions the fluids flowed to are not part of the question. A position is a result only when its final state
+ * is not air, not what was placed there, and not a state of a fluid the arrangement itself poured.
  */
 public final class Settler {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * How far the virtual game time may run past the placement. Fluid tick delays decide this: vanilla lava's is
-     * 30 in the overworld and the slowest fluid on the development classpath 50, so this leaves room for a rule
-     * that waits for a scheduled tick, and for what that tick sets off, to have happened.
+     * How far the virtual game time can run past the placement. Vanilla lava's tick delay is 30 in the
+     * overworld and the slowest fluid on the development classpath has 50. This leaves room for a rule that waits
+     * for a scheduled tick, and for what that tick sets off.
      */
     public static final int SETTLE_TICKS = 80;
 
-    /** A ceiling on one arrangement's cost: a fluid pouring off the bedrock reschedules itself indefinitely. */
+    /** A ceiling on the cost of one arrangement: a fluid that pours off the bedrock reschedules itself without end. */
     private static final int MAX_TICK_RUNS = 20_000;
 
+    /** Orders results so that two arrangements with the same results produce the same recipe. */
+    private static final Comparator<BlockPos> OFFSET_ORDER = Comparator
+            .<BlockPos>comparingInt(BlockPos::getY)
+            .thenComparingInt(BlockPos::getX)
+            .thenComparingInt(BlockPos::getZ);
+
     private final SandboxLevel level;
-    private final Map<Object, Rest> cache = new HashMap<>();
     private int settled;
-    private int reused;
     private long nanos;
 
     public Settler(SandboxLevel level) {
@@ -82,37 +80,35 @@ public final class Settler {
      *
      * @param content        the arrangement, keyed by offset from the source, which sits at {@link BlockPos#ZERO}
      *                       and is placed last
-     * @param neighborOffset where the recipe's neighbor sits, which decides how a flow is fed
-     * @param wrote          what the proposing rule itself wrote when it was called by hand, keyed by the same
-     *                       offsets and already filtered the way that tier filters its own writes
+     * @param neighborOffset where the neighbor of the recipe sits, which decides how a flow is fed
+     * @param wrote          what the rule itself wrote when it was called by hand, keyed by the same offsets and
+     *                       filtered the way that tier filters its own writes
      */
     public Outcome settle(Map<BlockPos, Placement> content, BlockPos neighborOffset, Map<BlockPos, BlockState> wrote) {
-        Rest rest = rest(content, neighborOffset);
-        Preemption preempted = preempted(rest, wrote);
+        long start = System.nanoTime();
+        Rest rest = run(content, neighborOffset);
+        nanos += System.nanoTime() - start;
+        settled++;
+        if (!rest.completed()) {
+            return new Outcome(Map.of(), null);
+        }
+        Preemption preempted = preempted(wrote);
         if (preempted != null) {
             return new Outcome(Map.of(), preempted);
         }
         return new Outcome(diff(rest, content, wrote.keySet()), null);
     }
 
-    /** The arrangement a spread or neighbor tier describes: the source, and one candidate at the probed target. */
-    public static Map<BlockPos, Placement> arrangement(FluidState source, BlockPos target, Placement candidate) {
-        Map<BlockPos, Placement> content = new LinkedHashMap<>();
-        content.put(BlockPos.ZERO, Placement.ofFluid(source));
-        content.put(target, candidate);
-        return content;
-    }
-
     /**
-     * What one settled arrangement says. Either it produced results, which may be empty, or a level pre-empted
-     * the rule that proposed it and {@link #preempted()} says what stands where that rule wrote instead.
+     * What one settled arrangement says. Either it produced results, which can be empty, or a level pre-empted
+     * the rule that proposed it and {@link #preempted()} says what stands where that rule wrote.
      */
     public record Outcome(Map<BlockPos, BlockState> results, @Nullable Preemption preempted) {
     }
 
     /**
-     * What a level holds where a rule wrote. The first difference carries the whole observation a recipe can
-     * state, while {@link #describe()} names every one of them for the log.
+     * What a level holds where a rule wrote. The first difference is the observation a recipe states, and
+     * {@link #describe()} names every difference for the log.
      *
      * @param offset   the first position, keyed from the source, where the settled level differs
      * @param found    what the settled level holds there
@@ -126,21 +122,15 @@ public final class Settler {
         }
     }
 
-    private Rest rest(Map<BlockPos, Placement> content, BlockPos neighborOffset) {
-        Object key = List.of(Map.copyOf(content), neighborOffset);
-        Rest known = cache.get(key);
-        if (known != null) {
-            reused++;
-            return known;
-        }
-        long start = System.nanoTime();
-        Rest rest = run(content, neighborOffset);
-        nanos += System.nanoTime() - start;
-        settled++;
-        cache.put(key, rest);
-        return rest;
+    public int settledCount() {
+        return settled;
     }
 
+    public long millis() {
+        return nanos / 1_000_000;
+    }
+
+    /** Builds the arrangement in the live sandbox and runs its fluid ticks. The level then holds the answer. */
     private Rest run(Map<BlockPos, Placement> content, BlockPos neighborOffset) {
         Map<BlockPos, Placement> fixtures = Fixtures.around(content, neighborOffset);
         Map<BlockPos, Placement> placed = new LinkedHashMap<>(fixtures);
@@ -148,43 +138,36 @@ public final class Settler {
         level.reset();
         level.setLive(true);
         try {
-            fixtures.forEach((offset, placement) -> level.placeLive(InteractionProber.ORIGIN.offset(offset), placement));
+            fixtures.forEach((offset, placement) -> level.placeLive(SandboxLevel.ORIGIN.offset(offset), placement));
             content.forEach((offset, placement) -> {
                 if (!offset.equals(BlockPos.ZERO)) {
-                    level.placeLive(InteractionProber.ORIGIN.offset(offset), placement);
+                    level.placeLive(SandboxLevel.ORIGIN.offset(offset), placement);
                 }
             });
             Placement source = content.get(BlockPos.ZERO);
             if (source != null) {
-                level.placeLive(InteractionProber.ORIGIN, source);
+                level.placeLive(SandboxLevel.ORIGIN, source);
             }
             level.settle(SETTLE_TICKS, MAX_TICK_RUNS);
         } catch (RuntimeException | LinkageError e) {
             LOGGER.debug("Settling {} threw", describe(content), e);
-            return new Rest(Map.of(), placed, Set.of(), false);
+            return new Rest(placed, Set.of(), false);
         } finally {
             level.setLive(false);
         }
-        Map<BlockPos, BlockState> states = new HashMap<>();
-        level.contents().forEach((pos, state) -> states.put(pos.subtract(InteractionProber.ORIGIN), state));
-        return new Rest(states, placed, poured(content, fixtures), true);
+        return new Rest(placed, poured(placed), true);
     }
 
-    /** Ordered so that two arrangements producing the same results produce the same recipe, whoever asked. */
-    private static final Comparator<BlockPos> OFFSET_ORDER = Comparator
-            .<BlockPos>comparingInt(BlockPos::getY)
-            .thenComparingInt(BlockPos::getX)
-            .thenComparingInt(BlockPos::getZ);
+    private BlockState stateAt(BlockPos offset) {
+        return level.getBlockState(SandboxLevel.ORIGIN.offset(offset));
+    }
 
-    private static Map<BlockPos, BlockState> diff(Rest rest, Map<BlockPos, Placement> content, Set<BlockPos> wrote) {
-        if (!rest.completed()) {
-            return Map.of();
-        }
+    private Map<BlockPos, BlockState> diff(Rest rest, Map<BlockPos, Placement> content, Set<BlockPos> wrote) {
         Set<BlockPos> domain = new LinkedHashSet<>(content.keySet());
         domain.addAll(wrote);
         Map<BlockPos, BlockState> results = new TreeMap<>(OFFSET_ORDER);
         for (BlockPos offset : domain) {
-            BlockState found = rest.stateAt(offset);
+            BlockState found = stateAt(offset);
             Placement placement = rest.placed().get(offset);
             if (found.isAir() || (placement != null && found.equals(placement.block()))) {
                 continue;
@@ -198,20 +181,13 @@ public final class Settler {
         return Collections.unmodifiableMap(new LinkedHashMap<>(results));
     }
 
-    /**
-     * What stands where the proposing rule wrote, whenever that is not what the rule wrote, or null when every
-     * one of its writes survived. An arrangement that threw says nothing about any rule, so it is never
-     * pre-empted.
-     */
-    private static @Nullable Preemption preempted(Rest rest, Map<BlockPos, BlockState> wrote) {
-        if (!rest.completed()) {
-            return null;
-        }
+    /** What stands where the rule wrote, when that is not what the rule wrote, or null when every write survived. */
+    private @Nullable Preemption preempted(Map<BlockPos, BlockState> wrote) {
         List<String> lines = new ArrayList<>();
         BlockPos offset = null;
         BlockState found = null;
         for (var entry : wrote.entrySet()) {
-            BlockState there = rest.stateAt(entry.getKey());
+            BlockState there = stateAt(entry.getKey());
             if (survived(entry.getValue(), there)) {
                 continue;
             }
@@ -227,7 +203,7 @@ public final class Settler {
         return new Preemption(offset, found, wrote.get(offset), String.join(", ", lines));
     }
 
-    /** Whether the settled state is the state a rule wrote, a fluid counting as itself whatever its level. */
+    /** Whether the settled state is the state a rule wrote. A fluid counts as itself at any level. */
     private static boolean survived(BlockState written, BlockState found) {
         if (written.equals(found)) {
             return true;
@@ -243,16 +219,14 @@ public final class Settler {
     }
 
     /** Every fluid the arrangement itself put somewhere, content and fixtures alike, in its still form. */
-    private static Set<Fluid> poured(Map<BlockPos, Placement> content, Map<BlockPos, Placement> fixtures) {
+    private static Set<Fluid> poured(Map<BlockPos, Placement> placed) {
         Set<Fluid> fluids = new LinkedHashSet<>();
-        for (Map<BlockPos, Placement> part : List.of(content, fixtures)) {
-            part.values().forEach(placement -> {
-                FluidState state = placement.effectiveFluid();
-                if (!state.isEmpty()) {
-                    fluids.add(FluidInteractionRecipe.stillForm(state));
-                }
-            });
-        }
+        placed.values().forEach(placement -> {
+            FluidState state = placement.effectiveFluid();
+            if (!state.isEmpty()) {
+                fluids.add(FluidInteractionRecipe.stillForm(state));
+            }
+        });
         return fluids;
     }
 
@@ -262,31 +236,13 @@ public final class Settler {
         return parts.toString();
     }
 
-    public int settledCount() {
-        return settled;
-    }
-
-    public int reusedCount() {
-        return reused;
-    }
-
-    public long millis() {
-        return nanos / 1_000_000;
-    }
-
     /**
-     * One settled arrangement, kept as it came to rest so that every tier proposing it can be answered from the
-     * same run.
+     * How one arrangement was built. The level itself holds the settled states until the next reset.
      *
-     * @param states    every block the level holds afterwards, keyed by offset from the source; air is absent
-     * @param placed    what the arrangement put where, fixtures included, keyed by the same offsets
+     * @param placed    what the arrangement put where, fixtures included, keyed by offset from the source
      * @param poured    every fluid the arrangement itself put somewhere, in still form
-     * @param completed false when the arrangement threw, which is no answer about any rule at all
+     * @param completed false when the arrangement threw, which is no answer about any rule
      */
-    private record Rest(Map<BlockPos, BlockState> states, Map<BlockPos, Placement> placed, Set<Fluid> poured,
-                        boolean completed) {
-        BlockState stateAt(BlockPos offset) {
-            return states.getOrDefault(offset, Blocks.AIR.defaultBlockState());
-        }
+    private record Rest(Map<BlockPos, Placement> placed, Set<Fluid> poured, boolean completed) {
     }
 }

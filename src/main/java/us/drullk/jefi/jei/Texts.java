@@ -12,6 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.neoforged.neoforge.fluids.FluidType;
 
 /** Translation helpers for the fluid interaction category. */
 public final class Texts {
@@ -36,6 +37,14 @@ public final class Texts {
     /** The same hint where only clicks reach a scene, which is every layout that cannot take widgets. */
     public static MutableComponent clickToRotate() {
         return Component.translatableWithFallback(PREFIX + ".click_to_rotate", "Click to rotate");
+    }
+
+    /** The text of a failure recipe whose interaction the probe cannot run, with the owner when one is known. */
+    public static MutableComponent unable(FluidType type, @Nullable String owner) {
+        if (owner == null) {
+            return key("unable", type.getDescription());
+        }
+        return key("unable_from", type.getDescription(), owner);
     }
 
     /**

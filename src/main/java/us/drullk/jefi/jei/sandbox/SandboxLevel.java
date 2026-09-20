@@ -64,6 +64,9 @@ public final class SandboxLevel extends VirtualLevel {
     /** Everything happens inside one chunk so Gander's bakery only visits a single chunk column. */
     public static final AABB DEFAULT_BOUNDS = new AABB(0, 0, 0, 16, 16, 16);
 
+    /** Where a probe puts the source fluid: inside the bounds, with room on every side. */
+    public static final BlockPos ORIGIN = new BlockPos(7, 4, 7);
+
     /** What a server level allows; Gander builds its own updater with a limit of zero, which skips every update. */
     private static final int MAX_CHAINED_NEIGHBOR_UPDATES = 1_000_000;
 
@@ -130,12 +133,6 @@ public final class SandboxLevel extends VirtualLevel {
         setBlock(pos, placement.block(), Block.UPDATE_ALL);
     }
 
-    /** Every block the level currently holds; air is absent rather than stored. */
-    public Map<BlockPos, BlockState> contents() {
-        Map<BlockPos, BlockState> result = new LinkedHashMap<>(blocks.size());
-        blocks.long2ObjectEntrySet().forEach(entry -> result.put(BlockPos.of(entry.getLongKey()), entry.getValue()));
-        return result;
-    }
 
     // ---- modes and ticking ----------------------------------------------------------------------------------
 

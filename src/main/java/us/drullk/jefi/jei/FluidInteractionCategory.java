@@ -90,12 +90,22 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
             stillFluidsOf(recipe.sourceType()).forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
             return;
         }
-
         int[] inputs = inputSlotX(recipe);
         int next = 0;
+        addSourceSlot(builder, recipe, inputs[next++]);
+        if (!recipe.neighbors().isEmpty()) {
+            addNeighborSlot(builder, recipe, inputs[next++]);
+        }
+        for (var condition : recipe.conditions().entrySet()) {
+            addConditionSlot(builder, recipe, condition.getKey(), condition.getValue(), inputs[next++]);
+        }
+        addResultSlots(builder, recipe);
+    }
 
+    /** The source slot cycles the still fluids. Its tooltip names the forms, and the inert form when one exists. */
+    private static void addSourceSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x) {
         boolean sourceFlows = recipe.sources().stream().anyMatch(state -> !state.isSource());
-        IRecipeSlotBuilder source = slot(builder.addSlot(role(recipe, BlockPos.ZERO, sourceFlows), inputs[next++], ROW_Y)).setSlotName("source");
+        IRecipeSlotBuilder source = slot(builder.addSlot(role(recipe, BlockPos.ZERO, sourceFlows), x, ROW_Y)).setSlotName("source");
         recipe.sourceFluids().forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
         source.addRichTooltipCallback((view, tooltip) -> {
             tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY));
@@ -105,27 +115,31 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
                 tooltip.add(Texts.inertSource(inert).withStyle(ChatFormatting.YELLOW));
             }
         });
+    }
 
-        if (!recipe.neighbors().isEmpty()) {
-            boolean neighborFlows = recipe.neighbors().stream().anyMatch(Placement::isFlowing);
-            IRecipeSlotBuilder neighbor = slot(builder.addSlot(role(recipe, recipe.neighborOffset(), neighborFlows), inputs[next++], ROW_Y)).setSlotName("neighbor");
-            addPlacements(neighbor, recipe.neighbors());
-            neighbor.addRichTooltipCallback((view, tooltip) -> {
-                tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY));
-                Fluid shown = displayedFluid(view);
-                Placement inert = shown != null ? recipe.inert().neighborOf(shown) : null;
-                if (inert != null) {
-                    tooltip.add(Texts.inertNeighbor(inert).withStyle(ChatFormatting.YELLOW));
-                }
-            });
-        }
-        for (var condition : recipe.conditions().entrySet()) {
-            BlockPos offset = condition.getKey();
-            IRecipeSlotBuilder slot = slot(builder.addSlot(role(recipe, offset, condition.getValue().isFlowing()), inputs[next++], ROW_Y));
-            addPlacements(slot, List.of(condition.getValue()));
-            slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
-        }
+    /** The neighbor slot cycles the alternatives. Its tooltip names the position, and the inert form when one exists. */
+    private static void addNeighborSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x) {
+        boolean neighborFlows = recipe.neighbors().stream().anyMatch(Placement::isFlowing);
+        IRecipeSlotBuilder neighbor = slot(builder.addSlot(role(recipe, recipe.neighborOffset(), neighborFlows), x, ROW_Y)).setSlotName("neighbor");
+        addPlacements(neighbor, recipe.neighbors());
+        neighbor.addRichTooltipCallback((view, tooltip) -> {
+            tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY));
+            Fluid shown = displayedFluid(view);
+            Placement inert = shown != null ? recipe.inert().neighborOf(shown) : null;
+            if (inert != null) {
+                tooltip.add(Texts.inertNeighbor(inert).withStyle(ChatFormatting.YELLOW));
+            }
+        });
+    }
 
+    private static void addConditionSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, BlockPos offset, Placement placement, int x) {
+        IRecipeSlotBuilder slot = slot(builder.addSlot(role(recipe, offset, placement.isFlowing()), x, ROW_Y));
+        addPlacements(slot, List.of(placement));
+        slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
+    }
+
+    /** One output slot per result, in a row. A result away from the source names its position in the tooltip. */
+    private static void addResultSlots(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe) {
         int resultX = resultSlotX(recipe);
         for (var result : recipe.results().entrySet()) {
             BlockPos offset = result.getKey();
@@ -138,28 +152,18 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         }
     }
 
+    /**
+     * A builder without a slot view cannot position widgets or route input to them, so its scenes are static
+     * drawables and its text is drawn by hand. The plus sign and arrow come from the builder's own methods,
+     * because the widget-returning ones postdate the oldest supported JEI.
+     */
     @Override
     public void createRecipeExtras(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, IFocusGroup focuses) {
-        // A builder without a slot view can neither position widgets nor route input to them, so its scenes are
-        // static drawables and its text is drawn by hand.
         IRecipeSlotDrawablesView slots = builder.getRecipeSlots();
-
         if (recipe.isFailure()) {
-            int textWidth = WIDTH - 2 * MIN_MARGIN;
-            int textHeight = HEIGHT - SCENE_Y - MIN_MARGIN;
-            if (slots == null) {
-                builder.addDrawable(new TextDrawable(recipe.failure(), textWidth, textHeight)).setPosition(MIN_MARGIN, SCENE_Y);
-            } else {
-                builder.addText(recipe.failure(), textWidth, textHeight)
-                        .setPosition(MIN_MARGIN, SCENE_Y)
-                        .setTextAlignment(HorizontalAlignment.CENTER)
-                        .setTextAlignment(VerticalAlignment.CENTER);
-            }
+            addFailureText(builder, recipe, slots == null);
             return;
         }
-
-        // The widget-returning plus sign and arrow builders postdate the oldest supported JEI, so these are the
-        // only entry points to those two textures that every supported version has.
         int[] inputs = inputSlotX(recipe);
         for (int i = 1; i < inputs.length; i++) {
             place(builder.addRecipePlusSign(), inputs[i - 1] - 1 + SLOT_SIZE, ROW_Y, PLUS_GAP, 16);
@@ -171,24 +175,34 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         if (slots == null) {
             staticRotations.put(recipe, rotation);
         }
-
         addScene(builder, recipe, false, slots == null, rotation, source, neighbor, BEFORE_X);
         place(builder.addRecipeArrow(), BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE);
         addScene(builder, recipe, true, slots == null, rotation, source, neighbor, AFTER_X);
 
-        if (slots != null) {
-            if (source != null) {
-                InertFormIndicator indicator = InertFormIndicator.forSource(source, recipe, inputs[0] - 1, ROW_Y);
-                if (indicator != null) {
-                    builder.addWidget(indicator);
-                }
-            }
-            if (neighbor != null && !recipe.neighbors().isEmpty()) {
-                InertFormIndicator indicator = InertFormIndicator.forNeighbor(neighbor, recipe, inputs[1] - 1, ROW_Y);
-                if (indicator != null) {
-                    builder.addWidget(indicator);
-                }
-            }
+        if (source != null) {
+            addIndicator(builder, InertFormIndicator.forSource(source, recipe, inputs[0] - 1, ROW_Y));
+        }
+        if (neighbor != null && !recipe.neighbors().isEmpty()) {
+            addIndicator(builder, InertFormIndicator.forNeighbor(neighbor, recipe, inputs[1] - 1, ROW_Y));
+        }
+    }
+
+    private static void addFailureText(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean drawable) {
+        int textWidth = WIDTH - 2 * MIN_MARGIN;
+        int textHeight = HEIGHT - SCENE_Y - MIN_MARGIN;
+        if (drawable) {
+            builder.addDrawable(new TextDrawable(recipe.failure(), textWidth, textHeight)).setPosition(MIN_MARGIN, SCENE_Y);
+            return;
+        }
+        builder.addText(recipe.failure(), textWidth, textHeight)
+                .setPosition(MIN_MARGIN, SCENE_Y)
+                .setTextAlignment(HorizontalAlignment.CENTER)
+                .setTextAlignment(VerticalAlignment.CENTER);
+    }
+
+    private static void addIndicator(IRecipeExtrasBuilder builder, @Nullable InertFormIndicator indicator) {
+        if (indicator != null) {
+            builder.addWidget(indicator);
         }
     }
 
