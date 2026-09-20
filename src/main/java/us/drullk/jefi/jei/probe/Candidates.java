@@ -18,15 +18,16 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * What the tiers put beside a source: every fluid a level can hold, and the default state of every block.
  *
- * <p>A fluid without a block of its own is in no list ({@link FluidBlocks#hasBlock}). A liquid block and a block
- * that holds a fluid state are in no block list, because the fluids are the candidates for those positions.
+ * <p>A fluid without a block of its own is in no list ({@link FluidBlocks#hasBlock}). A liquid block is in no
+ * block list. A block that holds a fluid state is in no block list. The fluids are the candidates for those
+ * positions.
  */
 final class Candidates {
-    /** Every fluid, in still form and then, when it has one, in a full flowing form. */
+    /** Every fluid in still form, then in a full flowing form when it has one. */
     final List<Placement> fluids;
     /** The default state of every block that holds no fluid. */
     final List<Placement> blocks;
-    /** The still form of every fluid, then the blocks: what the multi-position search of the registry tier tries. */
+    /** The still form of every fluid, then the blocks. The multi-position search of the registry tier tries these. */
     final List<Placement> stillFluidsAndBlocks;
 
     Candidates() {
@@ -61,8 +62,8 @@ final class Candidates {
     }
 
     /**
-     * The states of one type a tier probes as the source: each still fluid with a block, and its full flowing
-     * form when it has one.
+     * The states of one type a tier probes as the source. The list holds each still fluid with a block. It also
+     * holds the full flowing form of that fluid when it has one.
      */
     static List<FluidState> sourceStates(FluidType type) {
         List<FluidState> states = new ArrayList<>();
@@ -85,7 +86,7 @@ final class Candidates {
 
     /**
      * A full flowing state of a still fluid, or null when it has none. Some modded fluids register a flowing
-     * fluid without the level properties, so the state is only narrowed with {@code trySetValue}.
+     * fluid without the level properties. So only {@code trySetValue} narrows the state.
      */
     static @Nullable FluidState flowingForm(Fluid fluid) {
         if (!(fluid instanceof FlowingFluid flowing)) {

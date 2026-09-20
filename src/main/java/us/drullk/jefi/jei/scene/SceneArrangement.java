@@ -20,19 +20,19 @@ import net.neoforged.neoforge.fluids.FluidStack;
 /**
  * Turns a recipe plus a choice of cycling alternatives into the blocks one scene draws.
  *
- * <p>Whatever is drawn in a flowing form gets a full source block of the same fluid placed on its far side:
- * vanilla only uses the flowing top texture while the flow vector is non-zero, which needs a higher fluid to
- * flow from. The far side of the source position is the one opposite the neighbor and the far side of the
- * neighbor position the one away from the source, so a row of up to four blocks reads outwards in both
+ * <p>Whatever is drawn in a flowing form gets a full source block of the same fluid on its far side. Vanilla
+ * only shows the flowing top texture while the flow vector is non-zero. That texture needs a higher fluid to
+ * flow from. The far side of the source position is the side opposite the neighbor. The far side of the
+ * neighbor position is the side away from the source. So a row of up to four blocks reads outward in both
  * directions: neighbor source, flowing neighbor, flowing source, source.
  *
- * <p>That flowing display shows a fluid arriving sideways from a fed source, which has no vertical analogue: a
- * fluid never flows upwards, so a feed block below a flowing one would not read as feeding it. A recipe whose
- * neighbor offset is vertical is therefore drawn as two still blocks and nothing else, and
- * {@link #neighborIndex} picks the alternative that matches.
+ * <p>That flowing display shows a fluid arriving sideways from a fed source. This has no vertical analogue,
+ * because a fluid never flows upward. A feed block below a flowing one does not read as feeding it. So a
+ * recipe whose neighbor offset is vertical draws as two still blocks and nothing else. {@link #neighborIndex}
+ * picks the alternative that matches.
  */
 public final class SceneArrangement {
-    /** Fluid level of a block drawn in its flowing form; probing uses a full flow, a different value than assigned here. */
+    /** Fluid level of a block drawn in its flowing form. Probing uses a full flow, a different value than the one assigned here. */
     public static final int DISPLAY_FLOW_LEVEL = 6;
 
     private SceneArrangement() {
@@ -86,8 +86,9 @@ public final class SceneArrangement {
      * Index of the neighbor alternative a slot is currently displaying, or 0 when it shows something unexpected.
      *
      * <p>A JEI slot only ever shows a still fluid, so both forms of one fluid look the same in it. When a recipe
-     * holds both, the preferred one is whichever form the scene draws at the neighbor position: the flowing one
-     * beside the source, the still one above or below it. Either was verified by the probe.
+     * holds both, the preferred form is whichever one the scene draws at the neighbor position. The scene draws
+     * the flowing form beside the source. It draws the still form above or below the source. The probe verified
+     * either form.
      */
     public static int neighborIndex(FluidInteractionRecipe recipe, @Nullable ITypedIngredient<?> displayed) {
         if (displayed == null) {
@@ -126,8 +127,8 @@ public final class SceneArrangement {
     }
 
     /**
-     * The placement to draw for a probed alternative: a fluid verified in flowing form is redrawn at the display
-     * flow level, everything else is drawn as probed.
+     * The placement to draw for a probed alternative. The scene redraws a fluid verified in flowing form at the
+     * display flow level. It draws everything else as probed.
      */
     private static Placement displayForm(Placement placement) {
         if (!placement.isFlowing() || !(placement.effectiveFluid().getType() instanceof FlowingFluid flowing)) {
@@ -138,7 +139,7 @@ public final class SceneArrangement {
                 .trySetValue(FlowingFluid.FALLING, false));
     }
 
-    /** The placement to draw where no flow can be shown: a fluid in its still form, everything else as probed. */
+    /** The placement to draw where no flow shows: a fluid in its still form, everything else as probed. */
     private static Placement stillForm(Placement placement) {
         if (!placement.isFlowing()) {
             return placement;

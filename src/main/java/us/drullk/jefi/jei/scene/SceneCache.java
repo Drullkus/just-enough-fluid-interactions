@@ -24,12 +24,13 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Lazily bakes the scenes of recipes into GPU buffers with Gander's bakery, and frees them again when JEI's
- * runtime goes away. Every combination of cycling alternatives and phase is baked separately, and all of a
- * recipe's bakes are released together.
+ * Lazily bakes the scenes of recipes into GPU buffers, with Gander's bakery. It frees them again when JEI's
+ * runtime goes away. The cache bakes every combination of cycling alternatives and phase separately. It
+ * releases all of a recipe's bakes together.
  *
- * <p>Everything here runs on the render thread: JEI draws recipes there, and vertex buffers must be created and
- * destroyed there. One sandbox level is reused for every bake; only the baked buffers are kept per recipe.
+ * <p>Everything here runs on the render thread. JEI draws recipes on that thread. Vertex buffers must also be
+ * created and destroyed there. The cache reuses one sandbox level for every bake. It keeps only the baked
+ * buffers per recipe.
  */
 public final class SceneCache {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -43,7 +44,7 @@ public final class SceneCache {
     private final Map<FluidInteractionRecipe, Map<SceneVariant, Optional<BakedScene>>> scenes = new IdentityHashMap<>();
     private @Nullable SandboxLevel level;
 
-    /** Returns the baked scene, baking it on first use, or {@code null} when it could not be baked. */
+    /** The baked scene, baked on first use, or {@code null} when the bake failed. */
     public @Nullable BakedScene get(FluidInteractionRecipe recipe, SceneVariant variant) {
         return scenes.computeIfAbsent(recipe, r -> new HashMap<>())
                 .computeIfAbsent(variant, v -> bake(recipe, v))

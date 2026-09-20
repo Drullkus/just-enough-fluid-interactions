@@ -35,19 +35,21 @@ import net.neoforged.neoforge.registries.RegisterEvent;
 /**
  * Development-only fluids.
  *
- * <p>{@code hardening_brine}'s spread hardens a lava-tagged fluid directly below it into tuff, and only while the
- * fluid doing the spreading is the source: the flowing form runs the same gate, fails it, and spreads into the
- * position instead. That is the shape {@code JeiAutoTest} needs to see one form recorded as the one that produced
- * the result and the other as inert. It is in no fluid tag of its own, so nothing already registered treats it as
- * water or lava and no existing recipe changes. Vanilla only lets a water-tagged fluid replace a lava-tagged one,
- * so reaching a lava-tagged target needs the {@code canSpreadTo} override below; both forms share it, which is
- * why both forms reach {@code spreadTo} and only one of them writes anything.
+ * <p>{@code hardening_brine}'s spread hardens a lava-tagged fluid directly below it into tuff. This happens only
+ * while the spreading fluid is the source form. The flowing form runs the same gate, fails it, and spreads into
+ * the position instead. That is the shape {@code JeiAutoTest} needs: one form recorded as the one that produced
+ * the result, the other as inert. {@code hardening_brine} is in no fluid tag of its own. So nothing already
+ * registered treats it as water or lava, and no existing recipe changes. Vanilla lets only a water-tagged fluid
+ * replace a lava-tagged one. So reaching a lava-tagged target needs the {@code canSpreadTo} override below. Both
+ * forms share that override. That is why both forms reach {@code spreadTo}, and only one of them writes
+ * anything.
  *
- * <p>{@code dyed_water} runs no spread code of its own and is water-tagged by
- * {@code src/dev/resources/data/minecraft/tags/fluid/water.json}, which puts it among the fluids lava turns into
- * stone below itself. {@code JeiAutoTestInteractions} registers an interaction of its own with a lava neighbor,
- * which in a level fires on the block update that placing the lava sends, long before lava's spread tick; it is
- * the fixture proving that settling drops a spread alternative the registry reaches first.
+ * <p>{@code dyed_water} runs no spread code of its own. The tag file
+ * {@code src/dev/resources/data/minecraft/tags/fluid/water.json} marks it water-tagged. That puts it among the
+ * fluids lava turns into stone below itself. {@code JeiAutoTestInteractions} registers an interaction of its own
+ * with a lava neighbor. In a level, that interaction fires on the block update that placing the lava sends. That
+ * is long before lava's spread tick. This is the fixture that proves settling drops a spread alternative the
+ * registry reaches first.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestFluids {
@@ -113,8 +115,8 @@ public final class JeiAutoTestFluids {
     }
 
     /**
-     * A fluid claims its registry holder in its constructor, so none of this can exist before the registration
-     * events unfreeze the registries; every registration event finds it already built.
+     * A fluid claims its registry holder in its constructor. So none of this can exist before the registration
+     * events unfreeze the registries. Every registration event finds it already built.
      */
     private static void create() {
         if (type != null) {
@@ -168,7 +170,7 @@ public final class JeiAutoTestFluids {
         return direction == Direction.DOWN && toFluidState.is(FluidTags.LAVA);
     }
 
-    /** Only the source fluid hardens what it lands on; the flowing fluid falls through to plain spreading. */
+    /** Only the source fluid hardens what it lands on. The flowing fluid falls through to plain spreading. */
     private static boolean hardens(Fluid fluid, BlockState blockState, Direction direction) {
         return fluid == source && direction == Direction.DOWN && blockState.getFluidState().is(FluidTags.LAVA);
     }

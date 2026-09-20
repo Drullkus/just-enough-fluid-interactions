@@ -20,26 +20,27 @@ import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
- * Collapses probed recipes that describe the same interaction pattern into one recipe whose JEI slots cycle
- * through the alternatives, so a mod registering the same pattern for hundreds of fluids shows a handful of
- * recipes instead of hundreds.
+ * Collapses probed recipes that describe the same interaction pattern into one recipe. The JEI slots of that
+ * recipe cycle through the alternatives. A mod that registers the same pattern for hundreds of fluids thus shows
+ * a few recipes and not hundreds.
  *
- * <p>Two passes run over the recipe list in probe order. The first merges recipes of one source type whose
- * neighbor position, conditions, results, source forms and owner match, unioning their neighbor alternatives; the
- * second merges recipes of any source type whose neighbor alternatives, neighbor position, conditions, results,
- * source forms and owner match, unioning their source states. Neighbor alternatives compare by block state and
- * still fluid plus the forms each was matched in, so the exact flowing state a probe recorded never decides a
- * merge. Failure recipes never merge.
+ * <p>Two passes run over the recipe list in probe order. The first pass merges recipes of one source type whose
+ * neighbor position, conditions, results, source forms and owner match. It unions their neighbor alternatives.
+ * The second pass merges recipes of any source type whose neighbor alternatives, neighbor position, conditions,
+ * results, source forms and owner match. It unions their source states. Neighbor alternatives compare by block
+ * state and still fluid, plus the forms each one matched in. So the exact flowing state a probe recorded never
+ * decides a merge. Failure recipes never merge.
  *
- * <p>A merged recipe keeps the id and source type of its first member in probe order. Probe order ranks
- * the source fluid type by namespace ({@code minecraft}, then {@code neoforge}, then everything else
- * alphabetically) and then by path; within one type it ranks owner groups the same way (null owner last) and,
- * within one owner group, orders successes before failures, then by the result block at the source position
- * (again namespace-first, null result last), then by registration index, then by probe variant. Recipe ids
- * therefore stay unique and stable across runs for an unchanged set of registered interactions — including when
- * two mods race to register on the same fluid type during NeoForge's parallel mod-loading events — which is what
- * JEI's bookmarks need. Nothing that varies between runs takes part in a merge key, and output order follows
- * first-member probe order rather than any hash iteration order.
+ * <p>A merged recipe keeps the id and source type of its first member in probe order. Probe order ranks the
+ * source fluid type by namespace, and then by path. The namespace rank is {@code minecraft}, then
+ * {@code neoforge}, then everything else alphabetically. Within one type, probe order ranks owner groups the
+ * same way, with a null owner last. Within one owner group, it puts successes before failures. Then it ranks by
+ * the result block at the source position, again namespace first and null result last. Then it ranks by
+ * registration index, and then by probe variant. Recipe ids thus stay unique and stable across runs for an
+ * unchanged set of registered interactions. This includes the case of two mods that register on the same fluid
+ * type during NeoForge's parallel mod-loading events. JEI's bookmarks need that stability. No value that changes
+ * between runs is part of a merge key. The output order follows the probe order of the first member, and not a
+ * hash iteration order.
  */
 public final class RecipeMerger {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -88,15 +89,16 @@ public final class RecipeMerger {
         return new AcrossTypes(neighborForms(recipe), recipe.owner(), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
     }
 
-    /** Which forms the source was matched in, as a bit mask, so a still-only pattern never merges with a flowing one. */
+    /** Which forms the source matched in, as a bit mask. A still-only pattern thus never merges with a flowing one. */
     private static int forms(FluidInteractionRecipe recipe) {
         return (recipe.matchesSourceForm() ? FORM_SOURCE : 0) | (recipe.matchesFlowingForm() ? FORM_FLOWING : 0);
     }
 
     /**
-     * The neighbor alternatives as a form-normalized set: one entry per distinct block state and still fluid,
-     * carrying a bit mask of the forms that alternative was matched in. Two recipes therefore describe the same
-     * neighbor slot when they accept the same things in the same forms, whatever flowing state the probe recorded.
+     * The neighbor alternatives as a form-normalized set. There is one entry per distinct block state and still
+     * fluid. Each entry holds a bit mask of the forms that alternative matched in. Two recipes therefore describe
+     * the same neighbor slot when they accept the same things in the same forms. The flowing state the probe
+     * recorded does not change this.
      */
     private static Set<NeighborForms> neighborForms(FluidInteractionRecipe recipe) {
         Map<Placement, Integer> forms = new LinkedHashMap<>();
@@ -108,7 +110,7 @@ public final class RecipeMerger {
         return normalized;
     }
 
-    /** A fluid alternative reduced to its still form; anything else is already its own normal form. */
+    /** A fluid alternative in its still form. Anything else is already in its own normal form. */
     private static Placement stillForm(Placement placement) {
         if (!placement.isFluid()) {
             return placement;
@@ -124,11 +126,11 @@ public final class RecipeMerger {
                                Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) {
     }
 
-    /** One neighbor alternative in its still form, with the forms it was matched in as a bit mask. */
+    /** One neighbor alternative in its still form, with the forms it matched in as a bit mask. */
     private record NeighborForms(Placement neighbor, int forms) {
     }
 
-    /** Members of one merge; the first one supplies everything the merged recipe does not union. */
+    /** The members of one merge. The first member supplies everything the merged recipe does not union. */
     private static final class Merge {
         private final FluidInteractionRecipe first;
         private final Set<FluidState> sources = new LinkedHashSet<>();

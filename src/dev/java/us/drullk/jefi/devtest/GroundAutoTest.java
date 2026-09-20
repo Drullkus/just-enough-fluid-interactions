@@ -36,18 +36,18 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
 /**
- * Development-only grounding run, enabled by {@code -Djustenoughfluidinteractions.groundtest=true} (see the
- * {@code clientGroundTest} run configuration). It creates the same flat creative world the recipe viewer smoke
- * tests use, waits for JEI to hand out the probed recipes, and then rebuilds every alternative of every one of
- * them in the integrated server's own {@link ServerLevel}. What the level settles on is compared with what the
- * probe settled on in its sandbox.
+ * Development-only grounding run. The system property {@code -Djustenoughfluidinteractions.groundtest=true}
+ * enables it (see the {@code clientGroundTest} run configuration). It creates the same flat creative world the
+ * recipe viewer smoke tests use. It waits for JEI to hand out the probed recipes. Then it rebuilds every
+ * alternative of every recipe in the integrated server's own {@link ServerLevel}. This run compares what the
+ * level settles on with what the probe settled on in its sandbox.
  *
- * <p>Arrangements are placed in cells on a grid, all of them at once, so one settling period covers a whole
- * batch. Cells are spaced far enough apart that a fluid escaping one falls away from the grid rather than
- * reaching the next, and each cell is emptied before it is reused.
+ * <p>This run places arrangements in cells on a grid, all at once, so one settling period covers a whole batch.
+ * The cells sit far enough apart that a fluid escaping one falls away from the grid, not into the next cell.
+ * Each cell empties before its next use.
  *
- * <p>A mismatch says the sandbox and a real level disagree at one position, which is the finding this run
- * exists to produce.
+ * <p>A mismatch shows that the sandbox and a real level disagree at one position. Finding mismatches is the
+ * reason this run exists.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID, value = Dist.CLIENT)
 public final class GroundAutoTest {
@@ -61,15 +61,15 @@ public final class GroundAutoTest {
     private static final int CELL_SPACING = 8;
     private static final int CELLS_PER_ROW = 16;
     private static final int CELLS_PER_BATCH = CELLS_PER_ROW * CELLS_PER_ROW;
-    /** The same budget the sandbox settles an arrangement with, so both sides are given the same time. */
+    /** The sandbox settles an arrangement with this same budget, so both sides get the same time. */
     private static final int SETTLE_TICKS = Settler.SETTLE_TICKS;
     private static final int CLEAR_RADIUS = 3;
     private static final int CLEAR_BELOW = 5;
     private static final int CLEAR_ABOVE = 4;
 
     /**
-     * Recipes whose every alternative is reported whole even when the level and the probe agree. Anything that
-     * does not agree is reported whole anyway, so this is only for the arrangements worth reading either way.
+     * Every alternative of these recipes gets a full report, even when the level and the probe agree. A
+     * mismatch always gets a full report too. So this list only adds arrangements worth reading either way.
      */
     private static final List<String> WATCHED = List.of(
             "neighbor/the_bumblezone/sugar_water/",
@@ -281,9 +281,10 @@ public final class GroundAutoTest {
     }
 
     /**
-     * The arrangements a recipe does not describe but a question about one does: the Bumblezone's sugar water
-     * and a lava-tagged fluid beside, above and below each other, in both forms of each, and — where they sit
-     * side by side — in both orders of placing them, since a level runs the hooks of the block placed last first.
+     * These arrangements are not in any recipe. They answer a question about a level instead. This test pairs
+     * the Bumblezone's sugar water with a lava-tagged fluid. It places them beside, above and below each other,
+     * in both fluid forms. Where the two sit side by side, it also builds both orders of placing them. A level
+     * runs the last block's own hooks before it notifies neighbors. So the order of placing matters.
      */
     private static List<Case> buildCases() {
         Fluid sugarWater = sourceOfType(SUGAR_WATER);

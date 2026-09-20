@@ -20,8 +20,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.ResourceLocation;
 
 /**
- * The steps of the EMI smoke test. EMI is on the {@code clientEmiTest} run's classpath alone, so every reference
- * to it lives in this class, which no other run ever loads.
+ * The steps of the EMI smoke test. EMI is on the {@code clientEmiTest} run's classpath alone. So every reference
+ * to it lives in this class, and no other run loads this class.
  */
 final class EmiAutoTestSteps {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -33,8 +33,9 @@ final class EmiAutoTestSteps {
     private static List<EmiRecipe> recipes = List.of();
 
     /**
-     * The test as a list of steps: enter the world, open the category, screenshot it and the first recipes,
-     * click the left scene of the recipe on screen, screenshot it turned, stop the client.
+     * The test runs as a list of steps. It enters the world. It opens the category. It screenshots the category
+     * and the first recipes. It clicks the left scene of the recipe on screen. It screenshots the recipe turned.
+     * It stops the client.
      */
     private static final TickSteps STEPS = new TickSteps()
             .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
@@ -74,7 +75,7 @@ final class EmiAutoTestSteps {
         EmiApi.displayRecipeCategory(category);
     }
 
-    /** Screenshots the recipe on screen, then shows the next one. False once every recipe is shot. */
+    /** Screenshots the recipe on screen, then shows the next one. Returns false once it screenshots every recipe. */
     private static boolean nextRecipe(Minecraft mc) {
         if (shot > 0) {
             EmiRecipe shown = recipes.get(shot - 1);
@@ -90,8 +91,8 @@ final class EmiAutoTestSteps {
     }
 
     /**
-     * Clicks the middle of the left scene of the recipe on screen, which is the click EMI hands to the category
-     * and the only rotation its static scenes have.
+     * Clicks the middle of the left scene of the recipe on screen. EMI hands this click to the category, and it
+     * is the only rotation EMI's static scenes have.
      */
     private static void rotate(Minecraft mc) {
         Screen screen = mc.screen;
@@ -110,7 +111,7 @@ final class EmiAutoTestSteps {
         }
     }
 
-    /** EMI keeps the groups of the page it shows to itself, and the recipe this test clicks is the first. */
+    /** EMI keeps the groups of the page it shows to itself. The recipe this test clicks is the first group. */
     private static @Nullable WidgetGroup firstGroup(Screen screen) {
         try {
             Field field = RecipeScreen.class.getDeclaredField("currentPage");

@@ -21,15 +21,16 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 /**
- * One probed recipe alternative built in a real level and compared with what the probe claimed.
+ * This class builds one probed recipe alternative in a real level. It compares the result with what the probe
+ * claimed.
  *
- * <p>The probe settles every arrangement in a sandbox level that mirrors a real one. Building the same
- * arrangement in a {@link ServerLevel} and letting the real thing run is what says whether the mirror is
- * faithful: a mismatch means the sandbox and a level disagree, which is the finding this run exists to produce.
+ * <p>The probe settles every arrangement in a sandbox level that mirrors a real one. This class builds the same
+ * arrangement in a {@link ServerLevel} and lets the real game run it. That shows whether the mirror is faithful.
+ * A mismatch means the sandbox and a level disagree. Finding mismatches is the reason this run exists.
  *
- * <p>The arrangement is the recipe's own content — the source state, one neighbor alternative and the recipe's
- * conditions — plus the {@link Fixtures} a level needs for that arrangement to exist at all, built by the same
- * code the sandbox builds them with so both sides are asked the same question.
+ * <p>The arrangement holds the recipe's own content: the source state, one neighbor alternative and the
+ * recipe's conditions. It also holds the {@link Fixtures} a level needs for that arrangement to exist at all.
+ * The same code builds these fixtures for the sandbox, so both sides face the same question.
  */
 final class GroundCheck {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
@@ -70,7 +71,7 @@ final class GroundCheck {
 
     /**
      * Whether every part of this arrangement is something a level can hold. A fluid registered without a liquid
-     * block of its own exists only in a bucket, so no level can ever be put into the state the probe recorded.
+     * block of its own exists only in a bucket. So no level can ever hold the state the probe recorded.
      */
     static boolean placeable(Alternative alternative) {
         if (Placement.ofFluid(alternative.source()).block().isAir()) {
@@ -92,10 +93,10 @@ final class GroundCheck {
     }
 
     /**
-     * Places one arrangement with its fixtures. The position named last goes last, and for a probed alternative
-     * that is the source: a level runs the hooks of the block being placed before it tells that block's
-     * neighbours anything, so the fluid poured last is the one whose own rule gets the first word — which is the
-     * fluid every tier probes as the source.
+     * Places one arrangement with its fixtures. The position named last goes last. For a probed alternative,
+     * that position is the source. A level runs the hooks of the block it places before it notifies that
+     * block's neighbors. So the fluid poured last is the one whose own rule runs first. That fluid is the one
+     * every tier probes as the source.
      */
     static void place(ServerLevel level, BlockPos origin, Map<BlockPos, Placement> content, BlockPos neighborOffset, BlockPos last) {
         Fixtures.around(content, neighborOffset).forEach((offset, placement) -> set(level, origin.offset(offset), placement.block()));
@@ -111,9 +112,9 @@ final class GroundCheck {
     }
 
     /**
-     * Where the settled level disagrees with the recipe. Every result offset has to hold the result block; every
-     * other content position is a catalyst the recipe leaves alone, so it has to still hold what was placed —
-     * except that a placement the probe recorded flowing may have settled at any level of the same fluid.
+     * Where the settled level disagrees with the recipe. Every result offset must hold the result block. Every
+     * other content position is a catalyst the recipe leaves alone, so it must still hold what was placed. The
+     * exception: a placement the probe recorded as flowing can settle at any level of the same fluid.
      */
     static List<Mismatch> verify(ServerLevel level, BlockPos origin, Alternative alternative) {
         List<Mismatch> mismatches = new ArrayList<>();

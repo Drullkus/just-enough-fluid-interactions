@@ -20,20 +20,21 @@ import net.minecraft.world.level.material.FluidState;
 /**
  * The neighbor tier: the hardening rules a fluid implements in the update hooks of its liquid block.
  *
- * <p>This is the channel a level runs first. When a block is placed, the level calls {@code onPlace} on it and
- * {@code neighborChanged} on the blocks around it, on the tick of the placement. {@code LiquidBlock} runs the
- * interaction registry from there. A rule in a {@code LiquidBlock} subclass therefore runs before the scheduled
- * spread tick of any fluid. The quiet sandbox delivers no block updates, so the tier calls the hooks directly.
+ * <p>This is the channel a level runs first. A level that places a block calls {@code onPlace} on it. It calls
+ * {@code neighborChanged} on the blocks around it. Both occur on the tick of the placement. {@code LiquidBlock}
+ * runs the interaction registry from there. A rule in a {@code LiquidBlock} subclass therefore runs before the
+ * scheduled spread tick of any fluid. The quiet sandbox delivers no block updates, so the tier calls the hooks
+ * directly.
  *
- * <p>Only a block that declares {@code neighborChanged}, {@code onPlace} or {@code updateShape} below
- * {@link LiquidBlock} is probed. {@code LiquidBlock} itself runs the interaction registry in those hooks, which
- * is the registry tier. A rule outside the block's own classes leaves no trace in its class chain, which is what
- * {@code forceProbe} is for.
+ * <p>The tier probes only a block that declares {@code neighborChanged}, {@code onPlace} or {@code updateShape}
+ * below {@link LiquidBlock}. {@code LiquidBlock} itself runs the interaction registry in those hooks, which is
+ * the registry tier. A rule outside the block's own classes leaves no trace in its class chain.
+ * {@code forceProbe} is for such a rule.
  *
- * <p>The candidate sits below, beside or above the source. These hooks are subject to no convention about the
- * direction they look in, so the tier probes all three. The candidates are the fluids, in both forms. The hooks
- * of the candidate are never called: a plain {@code LiquidBlock} runs the registry, and every other block is
- * probed as a source in its own turn.
+ * <p>The candidate sits below, beside or above the source. These hooks obey no convention about the direction
+ * they look in, so the tier probes all three. The candidates are the fluids, in both forms. The tier never calls
+ * the hooks of the candidate. A plain {@code LiquidBlock} runs the registry. The tier probes every other block
+ * as a source in its own turn.
  */
 public final class NeighborProber extends RuleProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -46,7 +47,7 @@ public final class NeighborProber extends RuleProber {
     private static final Set<String> UPDATE_METHODS = Set.of("neighborChanged", "onPlace", "updateShape");
 
     /**
-     * Where the class walk stops: {@link LiquidBlock} is the channel of the interaction registry and
+     * Where the class walk stops. {@link LiquidBlock} is the channel of the interaction registry.
      * {@code Block} is the inert default. A declaration at or above either is not a rule of the fluid's own.
      */
     private static final Set<String> BASE_BLOCKS = Set.of(
@@ -80,8 +81,8 @@ public final class NeighborProber extends RuleProber {
     }
 
     /**
-     * Tells the source that its neighbor changed, then that it was placed. {@code LiquidBlock} routes both hooks
-     * to the same rule.
+     * Tells the source that its neighbor changed, then that a level placed it. {@code LiquidBlock} routes both
+     * hooks to the same rule.
      */
     @Override
     void callHook(SandboxLevel level, FluidState source, BlockPos target, Placement candidate) {

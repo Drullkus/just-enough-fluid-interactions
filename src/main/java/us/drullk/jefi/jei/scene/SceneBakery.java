@@ -36,19 +36,19 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.client.model.data.ModelData;
 
 /**
- * Bakes a small region of a level into vertex buffers, producing Gander's {@link BakedLevel} so the rest of
+ * Bakes a small region of a level into vertex buffers. It produces Gander's {@link BakedLevel}, so the rest of
  * Gander's toolkit can draw it.
  *
  * <p>This stands in for Gander's own {@code LevelBakery} for two reasons. First, that bakery takes the fluid
- * vertex buffers from the <em>block</em> buffer pack, so a fluid and a block on the same render layer (lava next
- * to stone, for instance) interleave in one byte stream and only the first block's worth of vertices survives.
- * Second, it re-bakes the whole region once per level section, which doubles translucent geometry. Here every
- * position is visited once, block and fluid geometry get their own buffers, and the CPU-side buffers are freed as
- * soon as the meshes are uploaded. Translucency is sorted at upload time and the quad centroids are kept, so
- * {@link #resort} can rebuild the index buffers when the camera moves.
+ * vertex buffers from the <em>block</em> buffer pack. So a fluid and a block on the same render layer interleave
+ * in one byte stream. Lava next to stone is one example. Only the first block's worth of vertices survives.
+ * Second, it re-bakes the whole region once per level section, which doubles translucent geometry. Here the
+ * code visits every position once. Block and fluid geometry get their own buffers. The code frees the CPU-side
+ * buffers as soon as it uploads the meshes. The code sorts translucency at upload time and keeps the quad
+ * centroids. So {@link #resort} can rebuild the index buffers when the camera moves.
  *
- * <p>The baked sections carry no {@code SectionBufferBuilderPack}, so Gander's own
- * {@code BakedLevelSection.resortTranslucency} cannot be used on them.
+ * <p>The baked sections carry no {@code SectionBufferBuilderPack}. So the code cannot use Gander's own
+ * {@code BakedLevelSection.resortTranslucency} method on them.
  */
 public final class SceneBakery {
     private static final int INITIAL_BUFFER_BYTES = 64 * 1024;
@@ -57,9 +57,9 @@ public final class SceneBakery {
     }
 
     /**
-     * @param level          the level to read blocks and fluids from
-     * @param bounds         inclusive block bounds of the region to bake
-     * @param cameraPosition camera position in level coordinates, used to sort translucent quads
+     * @param level          the level to read blocks and fluids from.
+     * @param bounds         inclusive block bounds of the region to bake.
+     * @param cameraPosition camera position in level coordinates, used to sort translucent quads.
      */
     public static BakedLevel bake(Level level, AABB bounds, Vector3f cameraPosition) {
         BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderer();
@@ -133,9 +133,9 @@ public final class SceneBakery {
                 long seed = state.getSeed(pos);
                 random.setSeed(seed);
                 for (RenderType type : model.getRenderTypes(state, random, modelData)) {
-                    // tesselateBlock translates the pose for the block's model offset and never pops it, so each
-                    // call needs its own push/pop to keep that offset from leaking into the next render type or
-                    // into the fluid tesselated at the same position below.
+                    // tesselateBlock translates the pose for the block's model offset. It never pops that translation.
+                    // So each call needs its own push and pop. This keeps the offset from leaking into the next render
+                    // type, or into the fluid tesselated at the same position below.
                     pose.pushPose();
                     try {
                         modelRenderer.tesselateBlock(level, model, state, pos, pose, blocks.builder(type), true, random, seed,

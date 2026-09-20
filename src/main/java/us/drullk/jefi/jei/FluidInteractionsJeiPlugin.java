@@ -30,8 +30,8 @@ import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
 /**
  * Shows every {@link FluidInteractionRegistry} entry in JEI.
  *
- * <p>JEI starts after tags and recipes have synced, so a client level and its registry access exist by the time
- * recipes are registered. The interactions themselves are registered by mods during common setup, long before.
+ * <p>JEI starts after tags and recipes finish syncing. By that time, a client level and its registry access
+ * exist, so recipes can register. Mods register the interactions themselves during common setup, long before.
  */
 @JeiPlugin
 public final class FluidInteractionsJeiPlugin implements IModPlugin {

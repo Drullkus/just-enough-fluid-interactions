@@ -29,24 +29,23 @@ import net.neoforged.neoforgespi.language.IModFileInfo;
 import net.neoforged.neoforgespi.language.IModInfo;
 
 /**
- * Best-effort attribution of a registered fluid interaction to the mod that registered it.
+ * Approximate attribution of a registered fluid interaction to the mod that registered it.
  *
- * <p>The registry keeps no owner. Two kinds of evidence are available from a registered
- * predicate/action pair:
+ * <p>The registry keeps no owner. A registered predicate and action pair gives two kinds of evidence:
  * <ul>
- *     <li>the class declaring the lambda, whose module or package identifies a mod file. FML offers no
- *     class-to-mod lookup, so the mapping is built from {@link ModList#getModFiles()};</li>
- *     <li>the registry objects a lambda captured. {@code InteractionInformation}'s convenience constructors
- *     build their lambdas inside NeoForge's own class, so class evidence for those points at NeoForge no
- *     matter who called them; the captured result block or fluid type still carries the caller's namespace.</li>
+ *     <li>the class that declares the lambda. Its module or package identifies a mod file. FML offers no
+ *     class-to-mod lookup, so {@link ModList#getModFiles()} supplies the mapping;</li>
+ *     <li>the registry objects a lambda captures. {@code InteractionInformation}'s convenience constructors
+ *     build their lambdas inside NeoForge's own class. Class evidence for those points at NeoForge, whatever
+ *     mod calls them. The captured result block or fluid type still carries the caller's namespace.</li>
  * </ul>
- * Class evidence naming a third-party mod wins, then a captured namespace, then the source fluid type's
- * namespace, and only then the declaring class's own mod.
+ * Class evidence that names a third-party mod wins. Then comes a captured namespace, then the namespace of the
+ * source fluid type, and last the mod of the declaring class.
  */
 public final class InteractionOwners {
     private static final String MINECRAFT = "minecraft";
     private static final String NEOFORGE = "neoforge";
-    /** Captured lambdas nest a few levels deep; deeper reflection buys nothing but time. */
+    /** Captured lambdas nest a few levels deep. Deeper reflection costs time and finds nothing. */
     private static final int MAX_CAPTURE_DEPTH = 4;
 
     private InteractionOwners() {
@@ -85,7 +84,7 @@ public final class InteractionOwners {
         return ofRegistered(block.getClass(), BuiltInRegistries.BLOCK.getKey(block));
     }
 
-    /** The class evidence a lambda gives, then the registry namespace; a third-party mod wins over either. */
+    /** The class evidence a lambda gives, then the registry namespace. A third-party mod wins over both. */
     private static @Nullable String ofRegistered(Class<?> clazz, @Nullable ResourceLocation key) {
         String byClass = modOf(clazz);
         if (byClass != null && isThirdParty(byClass)) {
@@ -106,7 +105,7 @@ public final class InteractionOwners {
         return !MINECRAFT.equals(id) && !NEOFORGE.equals(id) && ModList.get().isLoaded(id);
     }
 
-    /** The mod owning a class, by module name and then by package; falls back to the raw module name. */
+    /** The mod that owns a class, found by module name and then by package. The fallback is the raw module name. */
     static @Nullable String modOf(Class<?> clazz) {
         Class<?> host = clazz.getNestHost();
         Module module = host.getModule();
@@ -139,7 +138,7 @@ public final class InteractionOwners {
         return key != null ? key.getNamespace() : null;
     }
 
-    /** Mod ids gathered from a predicate/action pair, in the order they were found. */
+    /** The mod ids from a predicate and action pair, in the order the scan finds them. */
     private static final class Evidence {
         final Set<String> classes = new LinkedHashSet<>();
         final Set<String> namespaces = new LinkedHashSet<>();
@@ -169,13 +168,13 @@ public final class InteractionOwners {
                 try {
                     scan(field.get(value), depth + 1);
                 } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
-                    // A capture that cannot be read simply yields no evidence.
+                    // A capture the scan cannot read gives no evidence.
                 }
             }
         }
     }
 
-    /** Built on first use, once the mod list exists. */
+    /** The first use builds the index, after the mod list exists. */
     private static final class Index {
         static final Map<String, String> BY_MODULE = new HashMap<>();
         static final Map<String, String> BY_PACKAGE = new HashMap<>();
@@ -196,7 +195,7 @@ public final class InteractionOwners {
                         BY_PACKAGE.putIfAbsent(pkg, id);
                     }
                 } catch (RuntimeException | LinkageError ignored) {
-                    // Mod files without a readable descriptor are matched by module name alone.
+                    // The module name alone matches a mod file with no readable descriptor.
                 }
             }
         }

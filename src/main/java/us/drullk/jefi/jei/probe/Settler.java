@@ -26,33 +26,34 @@ import net.minecraft.world.level.material.FluidState;
  * Finds what a level does with one arrangement: builds it in the live sandbox and lets it come to rest.
  *
  * <p>A probe tier calls one rule by hand and asks whether that rule writes anything. That says the arrangement
- * is worth a look and which rule owns it. What the arrangement produces is never only that rule's writes,
- * because a level runs every channel: the {@code onPlace} of the placement, the neighbor updates it sends, the
- * interaction registry the updated liquid blocks run, and the scheduled ticks of the fluids, in that order and
- * with everything each of them sets off. The settle step runs all of them, so the order of the channels comes
- * out of the simulation.
+ * is worth a look and which rule owns it. What the arrangement produces is never only the writes of that rule.
+ * A level runs every channel in order. First comes the {@code onPlace} of the placement. Then come the neighbor
+ * updates it sends. Then comes the interaction registry the updated liquid blocks run. Last come the scheduled
+ * ticks of the fluids. Everything each of them sets off also runs. The settle step runs all of them, so the
+ * simulation gives the order of the channels.
  *
  * <p>An arrangement answers for the rule that proposed it and for no other rule. That holds only while the
- * settled level agrees with what the rule wrote by hand: at every position the rule wrote, the settled state is
- * the same block state or, where the rule wrote a fluid, the same still fluid at any level. Anything different
- * there is the outcome of a different channel, which belongs to that channel's own recipe, so the arrangement is
- * dropped for the tier that proposed it. What the level adds beyond those positions, such as a result block that
- * changes a neighbor as it is placed, is part of the answer.
+ * settled level agrees with what the rule wrote by hand. At every position the rule wrote, the settled state is
+ * the same block state. Where the rule wrote a fluid, the same still fluid at any level is also an agreement.
+ * Anything different there is the outcome of a different channel. That outcome belongs to the recipe of that
+ * channel, so the tier that proposed the arrangement drops it. What the level adds beyond those positions is
+ * part of the answer. An example is a result block that changes a neighbor as a level places it.
  *
- * <p>The arrangement is placed the way {@code GroundCheck} places it in a real level: {@link Fixtures} first,
- * then the content, the source last. A level runs the hooks of the placed block before it notifies the
- * neighbors, and the fluid placed last is the one every tier probes as its source.
+ * <p>The settle step places the arrangement the way {@code GroundCheck} places it in a real level:
+ * {@link Fixtures} first, then the content, the source last. A level runs the hooks of the placed block before
+ * it notifies the neighbors. The fluid placed last is the one every tier probes as its source.
  *
  * <p>The answer is the diff over the content positions and the positions the rule wrote in. Fixtures and the
  * positions the fluids flowed to are not part of the question. A position is a result only when its final state
- * is not air, not what was placed there, and not a state of a fluid the arrangement itself poured.
+ * is not air. The state must also be different from what the arrangement placed there. It must also not be a
+ * state of a fluid the arrangement itself poured.
  */
 public final class Settler {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
      * How far the virtual game time can run past the placement. Vanilla lava's tick delay is 30 in the
-     * overworld and the slowest fluid on the development classpath has 50. This leaves room for a rule that waits
+     * overworld. The slowest fluid on the development classpath has 50. This leaves room for a rule that waits
      * for a scheduled tick, and for what that tick sets off.
      */
     public static final int SETTLE_TICKS = 80;
@@ -75,14 +76,14 @@ public final class Settler {
     }
 
     /**
-     * What the arrangement leaves behind, keyed by offset from the source, or why it says nothing about the rule
-     * that proposed it.
+     * What the arrangement leaves behind, keyed by offset from the source. It can instead say why the
+     * arrangement tells nothing about the rule that proposed it.
      *
-     * @param content        the arrangement, keyed by offset from the source, which sits at {@link BlockPos#ZERO}
-     *                       and is placed last
-     * @param neighborOffset where the neighbor of the recipe sits, which decides how a flow is fed
-     * @param wrote          what the rule itself wrote when it was called by hand, keyed by the same offsets and
-     *                       filtered the way that tier filters its own writes
+     * @param content        the arrangement, keyed by offset from the source. The source sits at
+     *                       {@link BlockPos#ZERO} and goes in last.
+     * @param neighborOffset where the neighbor of the recipe sits. This decides how a fixture feeds a flow.
+     * @param wrote          what the rule itself wrote at the hand call, keyed by the same offsets. The tier
+     *                       filters it the way it filters its own writes.
      */
     public Outcome settle(Map<BlockPos, Placement> content, BlockPos neighborOffset, Map<BlockPos, BlockState> wrote) {
         long start = System.nanoTime();
@@ -100,20 +101,20 @@ public final class Settler {
     }
 
     /**
-     * What one settled arrangement says. Either it produced results, which can be empty, or a level pre-empted
-     * the rule that proposed it and {@link #preempted()} says what stands where that rule wrote.
+     * What one settled arrangement says. It gives results, which can be empty. Or a level pre-empted the rule
+     * that proposed it, and {@link #preempted()} says what stands where that rule wrote.
      */
     public record Outcome(Map<BlockPos, BlockState> results, @Nullable Preemption preempted) {
     }
 
     /**
-     * What a level holds where a rule wrote. The first difference is the observation a recipe states, and
+     * What a level holds where a rule wrote. The first difference is the observation a recipe states.
      * {@link #describe()} names every difference for the log.
      *
-     * @param offset   the first position, keyed from the source, where the settled level differs
-     * @param found    what the settled level holds there
-     * @param wrote    what the rule itself wrote there
-     * @param describe every difference of the arrangement, as one line
+     * @param offset   the first position, keyed from the source, where the settled level differs.
+     * @param found    what the settled level holds there.
+     * @param wrote    what the rule itself wrote there.
+     * @param describe every difference of the arrangement, as one line.
      */
     public record Preemption(BlockPos offset, BlockState found, BlockState wrote, String describe) {
         @Override
@@ -237,11 +238,11 @@ public final class Settler {
     }
 
     /**
-     * How one arrangement was built. The level itself holds the settled states until the next reset.
+     * How the settle step built one arrangement. The level itself holds the settled states until the next reset.
      *
-     * @param placed    what the arrangement put where, fixtures included, keyed by offset from the source
-     * @param poured    every fluid the arrangement itself put somewhere, in still form
-     * @param completed false when the arrangement threw, which is no answer about any rule
+     * @param placed    what the arrangement put where, fixtures included, keyed by offset from the source.
+     * @param poured    every fluid the arrangement itself put somewhere, in still form.
+     * @param completed false when the arrangement threw, which is no answer about any rule.
      */
     private record Rest(Map<BlockPos, Placement> placed, Set<Fluid> poured, boolean completed) {
     }

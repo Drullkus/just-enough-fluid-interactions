@@ -11,17 +11,17 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 /**
- * What has to surround an arrangement for a level to hold it at all.
+ * What must surround an arrangement for a level to hold it at all.
  *
- * <p>Two things: a still source feeding every flowing part, since a flow with nothing above or beside it drains
- * within a tick and the arrangement would be gone before any scheduled tick ran, and bedrock under everything
- * that would otherwise fall. A flow is fed from the side and away from the rest of the arrangement, the way the
- * recipe scenes draw one, because a source placed on top of a flow pours through the arrangement once the
- * interaction has consumed what was under it.
+ * <p>There are two things. The first is a still source that feeds every flowing part. A flow with nothing above
+ * or beside it drains within a tick. The arrangement is then gone before any scheduled tick runs. The second is
+ * bedrock under everything that falls without it. A fixture feeds a flow from the side, away from the rest of
+ * the arrangement. The recipe scenes draw a flow the same way. A source on top of a flow pours through the
+ * arrangement after the interaction consumes what was below it.
  *
- * <p>The settle step and the development grounding run build the same fixtures from here, so what the sandbox
- * settles and what a real level settles are the same arrangement. Fixtures never enter a recipe: they are the
- * conditions of the question, not part of the answer.
+ * <p>The settle step and the development grounding run build the same fixtures from here. So the sandbox and a
+ * real level settle the same arrangement. Fixtures never enter a recipe. They are the conditions of the
+ * question, not part of the answer.
  */
 public final class Fixtures {
     private static final BlockState FLOOR = Blocks.BEDROCK.defaultBlockState();
@@ -36,11 +36,11 @@ public final class Fixtures {
     }
 
     /**
-     * The fixtures one arrangement needs, keyed by offset from the source and holding no position the content
+     * The fixtures one arrangement needs, keyed by offset from the source. The map holds no position the content
      * already occupies.
      *
-     * @param content        the arrangement's own content, keyed by offset from the source at {@link BlockPos#ZERO}
-     * @param neighborOffset where the recipe's neighbor sits, which is the direction a flow is fed away from
+     * @param content        the arrangement's own content, keyed by offset from the source at {@link BlockPos#ZERO}.
+     * @param neighborOffset where the recipe's neighbor sits. A fixture feeds a flow away from this direction.
      */
     public static Map<BlockPos, Placement> around(Map<BlockPos, Placement> content, BlockPos neighborOffset) {
         Map<BlockPos, Placement> fixtures = new LinkedHashMap<>();
@@ -58,7 +58,7 @@ public final class Fixtures {
         return fixtures;
     }
 
-    /** Where a flow at this offset is fed from first: outwards along the row the recipe scene draws. */
+    /** Where a fixture first feeds a flow at this offset: outwards along the row the recipe scene draws. */
     private static BlockPos away(BlockPos offset, BlockPos neighborOffset) {
         boolean horizontal = neighborOffset.getY() == 0 && !neighborOffset.equals(BlockPos.ZERO);
         if (offset.equals(BlockPos.ZERO)) {

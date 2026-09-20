@@ -48,10 +48,10 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * JEI category for probed fluid interactions.
  *
- * <p>Two 3D scenes show the arrangement before and after the interaction, with one arrow between them. Above the
- * left scene sits the input row (source fluid, the neighbor, and any extra required blocks, separated by plus
- * signs); above the right scene sit the results. A recipe whose interaction could not be processed shows only
- * the source fluid and an explanation.
+ * <p>Two 3D scenes show the arrangement before and after the interaction. One arrow sits between the two scenes.
+ * Above the left scene sits the input row: the source fluid, the neighbor, and any extra required blocks,
+ * separated by plus signs. Above the right scene sit the results. A recipe whose interaction the probe cannot
+ * process shows only the source fluid and an explanation.
  */
 public final class FluidInteractionCategory extends AbstractRecipeCategory<FluidInteractionRecipe> {
     public static final int WIDTH = 170;
@@ -61,7 +61,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static final int ICON_SIZE = 16;
 
     private static final int ROW_Y = 6;
-    /** Footprint of a slot including its background, which JEI draws one pixel outside the ingredient. */
+    /** Footprint of a slot, including its background. JEI draws the background one pixel outside the ingredient. */
     private static final int SLOT_SIZE = 18;
     private static final int PLUS_GAP = 15;
     private static final int RESULT_GAP = 2;
@@ -73,9 +73,9 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static final int AFTER_X = WIDTH - BEFORE_X - SCENE_SIZE;
 
     private final SceneCache scenes;
-    /** The slot view each recipe was last drawn with, which is what a static scene takes its alternatives from. */
+    /** The slot view used to draw each recipe most recently. A static scene reads its alternatives from that view. */
     private final Map<FluidInteractionRecipe, IRecipeSlotsView> drawnSlots = new IdentityHashMap<>();
-    /** The angles of the scenes a layout drew as drawables, which is the only rotation a click at the category can turn. */
+    /** The orbit angles of the scenes a layout drew as drawables. A click on the category can only turn these angles. */
     private final Map<FluidInteractionRecipe, SceneRotation> staticRotations = new IdentityHashMap<>();
 
     public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
@@ -153,9 +153,9 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * A builder without a slot view cannot position widgets or route input to them, so its scenes are static
-     * drawables and its text is drawn by hand. The plus sign and arrow come from the builder's own methods,
-     * because the widget-returning ones postdate the oldest supported JEI.
+     * A builder without a slot view cannot position widgets or route input to them. Its scenes become static
+     * drawables. It draws its own text by hand. The plus sign and arrow come from the builder's own methods,
+     * not the newer widget methods. The widget-returning methods postdate the oldest supported JEI version.
      */
     @Override
     public void createRecipeExtras(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, IFocusGroup focuses) {
@@ -225,9 +225,9 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * Turns a static scene. A layout that takes widgets gives the click to a {@link SceneWidget} instead, which
-     * claims it, so this only ever runs for the scenes that widget cannot draw; JEI deprecated this in favour of
-     * the widget handlers, and it remains the only input a builder without a slot view can deliver.
+     * Turns a static scene. A layout that takes widgets sends the click to a {@link SceneWidget} instead, and
+     * that widget claims it. So this method only runs for scenes the widget cannot draw. JEI deprecated this
+     * method in favor of the widget handlers. It remains the only input a builder without a slot view can deliver.
      */
     @SuppressWarnings("removal")
     @Override
@@ -267,15 +267,15 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * A placement is consumed when the interaction writes a result where it stood, unless one of its alternatives
-     * is a flowing fluid: that one costs nothing, since the source block feeding it survives, and a slot whose
-     * alternatives include a free one is not a cost.
+     * A placement is consumed when the interaction writes a result where it stood. An alternative that is a
+     * flowing fluid costs nothing, because the source block that feeds it survives. A slot with a free
+     * alternative is never a cost.
      */
     private static RecipeIngredientRole role(FluidInteractionRecipe recipe, BlockPos offset, boolean anyFlowing) {
         return recipe.results().containsKey(offset) && !anyFlowing ? RecipeIngredientRole.INPUT : RecipeIngredientRole.CATALYST;
     }
 
-    /** A rotatable widget where the layout can position and drive one, a drawable the category turns otherwise. */
+    /** A rotatable widget when the layout can position and drive it. Otherwise, a drawable that the category turns. */
     private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, boolean drawable, SceneRotation rotation,
                           @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
         if (drawable) {
@@ -289,8 +289,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * Centers a placeable in an area, as JEI's aligning overload of {@code setPosition} does: only the two
-     * argument form is guaranteed to be implemented by everything that reads this category's layout.
+     * Centers a placeable in an area, the way JEI's aligning {@code setPosition} overload does. Every reader of
+     * this category's layout implements only the two-argument form.
      */
     private static void place(IPlaceable<?> placeable, int x, int y, int areaWidth, int areaHeight) {
         placeable.setPosition(x + (areaWidth - placeable.getWidth()) / 2, y + (areaHeight - placeable.getHeight()) / 2);
@@ -327,16 +327,17 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * A slot holds blocks as often as fluids, and an amount means nothing for a block in the world, so every slot
-     * keeps JEI's default fluid renderer, which fills the same 16 by 16 at bucket capacity without an amount line.
+     * A slot holds blocks as often as fluids. An amount means nothing for a block in the world. So every slot
+     * keeps JEI's default fluid renderer. This renderer fills the same 16 by 16 square at bucket capacity, with
+     * no amount line.
      */
     private static IRecipeSlotBuilder slot(IRecipeSlotBuilder slot) {
         return slot.setStandardSlotBackground();
     }
 
     /**
-     * Adds each placement as a fluid or item ingredient; blocks without an item are only shown in the scene.
-     * JEI only knows still fluids, so both forms of one fluid share a single cycling entry.
+     * Adds each placement as a fluid or item ingredient. A block without an item shows only in the scene.
+     * JEI only knows still fluids, so both forms of one fluid share one cycling entry.
      */
     private static void addPlacements(IRecipeSlotBuilder slot, List<Placement> placements) {
         Set<Fluid> fluids = new LinkedHashSet<>();

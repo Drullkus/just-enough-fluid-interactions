@@ -20,9 +20,9 @@ import net.minecraft.client.gui.navigation.ScreenRectangle;
 /**
  * A JEI recipe widget showing one recipe's arrangement before or after the interaction as a 3D scene.
  *
- * <p>The scene follows whatever alternatives the input slots are currently cycling through, and can be orbited
- * by dragging with the left mouse button. A click that never became a drag steps the yaw instead, which is the
- * only rotation a layout that routes clicks but no drags can give.
+ * <p>The scene follows whatever alternatives the input slots are currently cycling through. A drag with the
+ * left mouse button can orbit it. A click that never became a drag steps the yaw instead. This is the only
+ * rotation a layout can give when it routes clicks and not drags.
  */
 public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     private final SceneView view;
@@ -69,8 +69,9 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     }
 
     /**
-     * Claiming the press keeps JEI from acting on a click that only started a drag, and is what makes the
-     * matching release reach this handler; the release turns the scene unless a drag has already turned it.
+     * Claiming the press keeps JEI from acting on a click that only started a drag. Claiming the press is also
+     * what makes the matching release reach this handler. The release turns the scene, unless a drag already
+     * turned it.
      */
     @Override
     public boolean handleInput(double mouseX, double mouseY, IJeiUserInput input) {
@@ -102,8 +103,8 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     }
 
     /**
-     * Only the rotation hint: the placements are the category's tooltip, which every viewer asks for, while a
-     * widget's tooltip is asked for by the layouts that route input to widgets.
+     * Only the rotation hint appears here. The placements are the category's tooltip, and every viewer asks
+     * for that. Only the layouts that route input to widgets ask for a widget's own tooltip.
      */
     @Override
     public void getTooltip(ITooltipBuilder tooltip, double mouseX, double mouseY) {

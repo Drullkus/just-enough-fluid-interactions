@@ -15,24 +15,27 @@ import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
- * One displayable outcome of a registered fluid interaction, discovered by probing it in a sandbox level.
+ * One displayable outcome of a registered fluid interaction. A probe in a sandbox level finds it.
  *
- * <p>All positions are offsets relative to the source fluid's position. A recipe either describes a successful
- * probe (source states, what must surround the source, and what gets written) or, when {@link #failure} is set,
- * records that the interaction exists but could not be exercised.
+ * <p>All positions are offsets from the position of the source fluid. A recipe describes a successful probe: the
+ * source states, what must surround the source, and what the probe writes. A recipe with a {@link #failure}
+ * instead records that the interaction exists and that no probe ran it.
  *
- * @param sourceType     the fluid type the interaction is registered against
- * @param id             a stable unique id for bookmarks and JEI's recipe lookups
- * @param sources        source fluid states that produced this exact outcome (source and/or flowing forms)
- * @param neighbors      alternatives for the tested neighbor position; any one of them triggers the interaction
- * @param neighborOffset where the neighbor sits relative to the source, {@link #NEIGHBOR_OFFSET} for everything
- *                       the registry probe finds
- * @param conditions     additional positions that must hold a specific block or fluid (found by multi-position search)
- * @param results        blocks written by the interaction, keyed by offset; normally just the source position
- * @param failure        non-null when the interaction could not be processed; the other collections are then empty
- * @param owner          mod id credited with registering the interaction, or null when none could be derived
- * @param inert          forms the same spread probe tried at this arrangement without a result, empty for
- *                       everything the registry probe finds
+ * @param sourceType     the fluid type the registry keys the interaction on.
+ * @param id             a stable unique id for bookmarks and JEI's recipe lookups.
+ * @param sources        source fluid states that give this exact outcome, in source form, flowing form or both.
+ * @param neighbors      alternatives for the tested neighbor position. Any one of them starts the interaction.
+ * @param neighborOffset where the neighbor sits relative to the source. It is {@link #NEIGHBOR_OFFSET} for
+ *                       everything the registry probe finds.
+ * @param conditions     more positions that must hold a specific block or fluid. The multi-position search
+ *                       finds them.
+ * @param results        the blocks the interaction writes, keyed by offset. Usually this is only the source
+ *                       position.
+ * @param failure        not null when no probe processed the interaction. The other collections are then empty.
+ * @param owner          the mod id credited with the registration of the interaction, or null when nothing
+ *                       identifies one.
+ * @param inert          forms the same spread probe tries at this arrangement with no result. It is empty for
+ *                       everything the registry probe finds.
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -46,7 +49,7 @@ public record FluidInteractionRecipe(
         @Nullable String owner,
         InertForms inert) {
 
-    /** The neighbor position handed to registered interactions when probing, relative to the source. */
+    /** The neighbor position the probe hands to registered interactions, as an offset from the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
 
     public static FluidInteractionRecipe failed(FluidType type, ResourceLocation id, Component reason, @Nullable String owner) {
@@ -57,7 +60,7 @@ public record FluidInteractionRecipe(
         return failure != null;
     }
 
-    /** Distinct still fluids among {@link #sources}, for the JEI input slot; JEI only knows still fluids. */
+    /** The distinct still fluids among {@link #sources}, for the JEI input slot. JEI knows only still fluids. */
     public List<Fluid> sourceFluids() {
         return sources.stream().map(FluidInteractionRecipe::stillForm).distinct().toList();
     }

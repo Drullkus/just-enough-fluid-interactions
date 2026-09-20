@@ -41,22 +41,23 @@ import net.neoforged.neoforge.client.model.data.ModelDataManager;
 /**
  * A throwaway {@link net.minecraft.world.level.Level} used to execute fluid interactions outside any real world.
  *
- * <p>Built on Gander's {@link VirtualLevel} for all the boilerplate (chunk source, light engine, biome, no-op
- * sounds and events), but with its own block and fluid storage so that the level reports back the exact fluid
- * state a probe placed rather than whatever its block turns into, and so every read and write can be recorded.
+ * <p>The level builds on Gander's {@link VirtualLevel} for the boilerplate: chunk source, light engine, biome,
+ * and no-op sounds and events. It keeps its own block and fluid storage. This storage lets the level report
+ * back the exact fluid state a probe placed, not whatever its block turns into. It also lets the level record
+ * every read and write.
  *
- * <p>The level has two modes. While it is quiet a write only lands in storage: no {@code onRemove}, no
- * {@code onPlace}, no neighbor notification, no shape update. That is what a probe tier needs while it calls one
- * hook of one rule by hand and asks what that hook alone wrote. While it is live ({@link #setLive(boolean)}) a
- * write goes through the steps a server level takes — the old state's {@code onRemove}, the new state's
- * {@code onPlace}, neighbor notification in vanilla's order through a {@link CollectingNeighborUpdater}, and the
- * shape updates — and scheduled fluid ticks land in a queue that {@link #settle(int, int)} drains against a
- * virtual game time.
+ * <p>The level has two modes. In quiet mode, a write only lands in storage: no {@code onRemove}, no
+ * {@code onPlace}, no neighbor notification, no shape update. A probe tier needs this mode while it calls one
+ * hook of one rule by hand and reads what that hook alone wrote. In live mode ({@link #setLive(boolean)}), a
+ * write goes through the steps a server level takes. First the old state's {@code onRemove} runs. Then the new
+ * state's {@code onPlace} runs. Then neighbor notification runs in vanilla's order, through a
+ * {@link CollectingNeighborUpdater}. Then the shape updates run. Scheduled fluid ticks then land in a queue.
+ * {@link #settle(int, int)} drains this queue against a virtual game time.
  *
- * <p>The level reports itself as server-side so interactions that guard on {@code !level.isClientSide} run.
- * Block scheduled ticks need a {@code ServerLevel} and are only counted; entities are denied; nothing is randomly
- * ticked; and neighbor notification skips NeoForge's {@code NeighborNotifyEvent}, so no event of a mod's fires
- * while recipes are being probed.
+ * <p>The level reports itself as server-side, so interactions that guard on {@code !level.isClientSide} run.
+ * Block scheduled ticks need a {@code ServerLevel}, so the level only counts them. The level denies entities.
+ * The level does not run random ticks. Neighbor notification skips NeoForge's {@code NeighborNotifyEvent}, so
+ * no event of a mod fires while the probe runs recipes.
  */
 public final class SandboxLevel extends VirtualLevel {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -67,7 +68,7 @@ public final class SandboxLevel extends VirtualLevel {
     /** Where a probe puts the source fluid: inside the bounds, with room on every side. */
     public static final BlockPos ORIGIN = new BlockPos(7, 4, 7);
 
-    /** What a server level allows; Gander builds its own updater with a limit of zero, which skips every update. */
+    /** What a server level allows. Gander builds its own updater with a limit of zero. That limit skips every update. */
     private static final int MAX_CHAINED_NEIGHBOR_UPDATES = 1_000_000;
 
     private final Long2ObjectMap<BlockState> blocks = new Long2ObjectOpenHashMap<>();
@@ -142,11 +143,11 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     /**
-     * Runs the scheduled fluid ticks the way a server level does: each round advances the virtual game time to
-     * the next due tick, collects everything due at that time in {@link ScheduledTick#DRAIN_ORDER} and runs the
-     * collected batch, so a tick scheduled while the batch runs waits for a later round exactly as it does in a
-     * level. Stops when nothing is due within {@code maxGameTicks} of where the settle started, or when
-     * {@code maxRuns} ticks have run.
+     * Runs the scheduled fluid ticks the way a server level does. Each round advances the virtual game time to
+     * the next due tick. It then collects everything due at that time, in {@link ScheduledTick#DRAIN_ORDER}, and
+     * runs the collected batch. A tick scheduled while the batch runs waits for a later round, exactly as in a
+     * level. The method stops when nothing is due within {@code maxGameTicks} of where the settle started. It
+     * also stops when {@code maxRuns} ticks have run.
      *
      * @return how many fluid ticks ran
      */
@@ -179,7 +180,7 @@ public final class SandboxLevel extends VirtualLevel {
         return runs;
     }
 
-    /** How many block scheduled ticks were asked for, in total; none of them can run without a server level. */
+    /** The total number of block scheduled ticks requested. None of them can run without a server level. */
     public int blockTicksRequested() {
         return blockTicksRequested;
     }
@@ -234,11 +235,11 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     /**
-     * Mirrors {@code Level.setBlock} together with the part of {@code LevelChunk.setBlockState} a level without
-     * block entities has: writing an identical state changes nothing, the old state is told it was removed, an
-     * {@code onRemove} that put a different block there abandons the write, and the new state is told it was
-     * placed before the neighbours hear anything. While the level is quiet none of that runs and the write is
-     * only recorded.
+     * Mirrors {@code Level.setBlock}, together with the part of {@code LevelChunk.setBlockState} a level without
+     * block entities has. Writing an identical state changes nothing. The old state's {@code onRemove} runs
+     * first, as if the block were removed. If that call places a different block there, the write stops.
+     * Otherwise the new state's {@code onPlace} runs, before the neighbors hear anything. While the level is
+     * quiet, none of this runs. The write is only recorded then.
      */
     @Override
     public boolean setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft) {
@@ -314,8 +315,8 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     /**
-     * The scheduling {@code LevelAccessor} would do, but against this level's own virtual game time rather than
-     * the shared, never-advancing level data Gander hands every virtual level.
+     * Schedules the tick the way a {@code LevelAccessor} does. It uses this level's own virtual game time
+     * instead of the shared, never-advancing level data Gander hands every virtual level.
      */
     @Override
     public void scheduleTick(BlockPos pos, Block block, int delay, TickPriority priority) {
@@ -433,8 +434,9 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     /**
-     * One kind's scheduled ticks, ordered and deduplicated the way a level's chunk tick containers are: one
-     * pending tick per position and type, drained by trigger time, then priority, then scheduling order.
+     * One kind's scheduled ticks. They are ordered and deduplicated the way a level's chunk tick containers are:
+     * one pending tick per position and type. The queue drains by trigger time, then priority, then scheduling
+     * order.
      */
     private static final class SandboxTicks<T> implements LevelTickAccess<T> {
         private final PriorityQueue<ScheduledTick<T>> queue = new PriorityQueue<>(ScheduledTick.DRAIN_ORDER);

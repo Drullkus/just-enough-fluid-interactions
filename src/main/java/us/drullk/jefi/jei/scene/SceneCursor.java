@@ -39,8 +39,8 @@ public final class SceneCursor {
     }
 
     /**
-     * The cursor drawn over a scene. A custom rotate icon would be loaded as a {@code GLFWImage} and created
-     * here with {@link GLFW#glfwCreateCursor} instead of the standard cursor.
+     * The cursor drawn over a scene. A custom rotate icon can load here as a {@code GLFWImage} and build with
+     * {@link GLFW#glfwCreateCursor}, in place of the standard cursor.
      */
     private static long handle() {
         if (cursor == MemoryUtil.NULL) {
@@ -53,7 +53,7 @@ public final class SceneCursor {
         GLFW.glfwSetCursor(Minecraft.getInstance().getWindow().getWindow(), handle);
     }
 
-    /** Nothing calls back once the recipe screen is gone, so the cursor has to be released from the outside. */
+    /** Nothing calls back once the recipe screen closes. So something outside must release the cursor. */
     private static void listen() {
         if (listening) {
             return;

@@ -50,7 +50,7 @@ public final class SceneRotation {
         return dragging;
     }
 
-    /** Whether the button that is down has moved since it was pressed, so a click can tell itself from a drag. */
+    /** Whether the button that is down has moved since it was pressed. This is how a click tells itself from a drag. */
     public boolean dragged() {
         return dragged;
     }
@@ -74,8 +74,8 @@ public final class SceneRotation {
     }
 
     /**
-     * Ends the drag once the mouse button comes back up. JEI only reports drags while the cursor is still over
-     * the widget, so the button itself is the reliable end of one.
+     * Ends the drag once the mouse button comes back up. JEI only reports drags while the cursor stays over the
+     * widget. So the button itself is the reliable end of a drag.
      */
     public void settle() {
         if (dragging && !leftMouseDown()) {

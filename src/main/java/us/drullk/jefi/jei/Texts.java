@@ -29,7 +29,7 @@ public final class Texts {
         return Component.translatable(PREFIX + "." + suffix, args);
     }
 
-    /** Hint on the scene widgets; carries its own wording so it reads correctly before the key is translated. */
+    /** Hint on the scene widgets. It carries its own wording, so it reads correctly before the key is translated. */
     public static MutableComponent rotate() {
         return Component.translatableWithFallback(PREFIX + ".drag_or_click_to_rotate", "Drag or click to rotate");
     }
@@ -48,8 +48,9 @@ public final class Texts {
     }
 
     /**
-     * Two sentences in Simplified Technical English: what the interaction changes the source into, given the
-     * neighbor beside it, and what the source changes into in the world, or that it does not change.
+     * Two sentences in Simplified Technical English. The first sentence states what the interaction changes the
+     * source into, given the neighbor beside it. The second sentence states what the source changes into in the
+     * world, or that it does not change.
      */
     public static MutableComponent preempted(FluidState source, @Nullable Placement neighbor, BlockState found, BlockState wrote) {
         Component sourceName = Placement.ofFluid(source).describe();
@@ -92,7 +93,7 @@ public final class Texts {
         return key("form.inert_source", form(state));
     }
 
-    /** States that the other form of a neighbor fluid was left as it was by the same spread. */
+    /** States that the same spread left a neighbor fluid's other form as it was. */
     public static MutableComponent inertNeighbor(Placement placement) {
         return key("form.inert_neighbor", form(placement.effectiveFluid()));
     }

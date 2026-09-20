@@ -6,11 +6,11 @@ import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
- * Whether a fluid is something a level can hold at all.
+ * Whether a level can hold a fluid at all.
  *
- * <p>A fluid registered without a block of its own exists only in a bucket or a tank: no level can ever be put
- * into a state that holds it, so no rule keyed on it can be exercised anywhere and nothing about it can be
- * probed. Every tier asks this before it offers a fluid as a source or as a candidate.
+ * <p>A fluid registered without a block of its own exists only in a bucket or a tank. No level can ever come
+ * into a state that holds it. So no rule keyed on it runs anywhere, and no tier can probe it. Every tier asks
+ * this before it offers a fluid as a source or as a candidate.
  */
 public final class FluidBlocks {
 
@@ -22,7 +22,7 @@ public final class FluidBlocks {
         return !fluid.defaultFluidState().createLegacyBlock().isAir();
     }
 
-    /** Whether any fluid of the type has a block, which is what lets the type stand anywhere at all. */
+    /** Whether any fluid of the type has a block. Only such a block lets the type stand anywhere at all. */
     public static boolean hasBlock(FluidType type) {
         for (Fluid fluid : BuiltInRegistries.FLUID) {
             if (fluid != Fluids.EMPTY && fluid.getFluidType() == type && hasBlock(fluid)) {

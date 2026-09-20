@@ -11,10 +11,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 /**
- * Something occupying one position of a probe scene: a block state, optionally with an explicit fluid state.
+ * Something that occupies one position of a probe scene: a block state, and optionally an explicit fluid state.
  *
- * @param block the block state at the position, air when only a fluid is present
- * @param fluid the fluid state at the position, or {@code null} to derive it from the block
+ * @param block the block state at the position, air when the position holds only a fluid.
+ * @param fluid the fluid state at the position, or {@code null} to take it from the block.
  */
 public record Placement(BlockState block, @Nullable FluidState fluid) {
 

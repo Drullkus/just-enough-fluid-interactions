@@ -24,7 +24,7 @@ import net.minecraft.world.level.levelgen.presets.WorldPresets;
 
 /** The flat creative world and the screenshots that every recipe viewer smoke test needs. */
 final class AutoTestWorld {
-    /** The dev-only interactions and fluids are registered for whichever development run is going. */
+    /** This flag is true for every development run. The dev-only interactions and fluids register only then. */
     static final boolean FIXTURES = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest")
             || Boolean.getBoolean("justenoughfluidinteractions.emiautotest")
             || Boolean.getBoolean("justenoughfluidinteractions.groundtest");
@@ -33,8 +33,8 @@ final class AutoTestWorld {
     }
 
     /**
-     * Dismisses the accessibility onboarding that a run directory without an {@code options.txt} opens, and
-     * reports whether the title screen is up and a world can be created.
+     * Dismisses the accessibility onboarding screen. A run directory with no {@code options.txt} file opens
+     * this screen on start. Reports whether the title screen is now open and ready for a new world.
      */
     static boolean atTitleScreen(Minecraft mc) {
         if (mc.screen instanceof AccessibilityOnboardingScreen) {
@@ -63,7 +63,7 @@ final class AutoTestWorld {
                 new TitleScreen());
     }
 
-    /** Runs from the title screen before any level is loaded, so the save directory is never open here. */
+    /** Runs from the title screen before any level loads, so the save directory is never open here. */
     private static void deleteExistingWorld(Minecraft mc, String worldName) {
         Path path = mc.getLevelSource().getLevelPath(worldName);
         if (!Files.isDirectory(path)) {

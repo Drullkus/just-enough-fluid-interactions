@@ -49,9 +49,10 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
 /**
- * Development-only smoke test, enabled by {@code -Djustenoughfluidinteractions.jeiautotest=true} (see the {@code clientJeiTest}
- * run configuration). Deletes any existing save and creates a fresh flat creative world, opens this mod's JEI
- * category, screenshots a few pages of recipes into {@code run/screenshots}, and exits the game.
+ * Development-only smoke test. The system property {@code -Djustenoughfluidinteractions.jeiautotest=true} enables
+ * it (see the {@code clientJeiTest} run configuration). It deletes any existing save and creates a fresh flat
+ * creative world. It opens this mod's JEI category, screenshots a few pages of recipes into
+ * {@code run/screenshots}, and exits the game.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID, value = Dist.CLIENT)
 public final class JeiAutoTest {
@@ -72,11 +73,11 @@ public final class JeiAutoTest {
     private static final String TAR_SPREAD_IDS = "spread/divinerpg/smoldering_tar_fluid_type/";
     /** Vanilla's stone, which lava's own spread code writes into a water-tagged fluid below it. */
     private static final String LAVA_SPREAD_IDS = "spread/minecraft/lava/";
-    /** The Bumblezone's honey, whose result block changes a neighbor of its own when it is placed. */
+    /** The Bumblezone's honey, whose result block changes a neighbor of its own on placement. */
     private static final String HONEY_IDS = "neighbor/the_bumblezone/honey/";
     /** The same honey as a fluid type, which Biomes O' Plenty registers an interaction on. */
     private static final ResourceLocation HONEY_TYPE = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "honey");
-    /** The block a level holds where that interaction would write, which is the honey the probe placed. */
+    /** The block a level holds at the position that interaction targets. It is the honey the probe placed there. */
     private static final ResourceLocation HONEY_BLOCK = ResourceLocation.fromNamespaceAndPath("the_bumblezone", "honey_fluid_block");
     private static final String BOP = "biomesoplenty";
     /** The neighbor Biomes O' Plenty's interaction looks for, and the two blocks it writes. */
@@ -112,8 +113,8 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The test as a list of steps: enter the world, read and check the recipes, screenshot the category and its
-     * pages, screenshot each recipe of {@link #SHOTS}, stop the client.
+     * The test runs as a list of steps. It enters the world. It reads and checks the recipes. It screenshots
+     * the category and its pages. It screenshots each recipe of {@link #SHOTS}. It stops the client.
      */
     private static TickSteps steps() {
         TickSteps steps = new TickSteps()
@@ -238,8 +239,9 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dev interactions registered for two fluid types with the same neighbors and result have to arrive as one
-     * recipe holding every source fluid and every neighbor, which only happens if both merge passes ran.
+     * The dev interactions registered for two fluid types with the same neighbors and result must arrive as one
+     * recipe. That recipe must hold every source fluid and every neighbor. This happens only if both merge
+     * passes ran.
      */
     private static void checkMerging(List<FluidInteractionRecipe> found) {
         BlockState result = JeiAutoTestInteractions.MERGE_RESULT.defaultBlockState();
@@ -273,8 +275,8 @@ public final class JeiAutoTest {
     }
 
     /**
-     * Vanilla's cobblestone interaction accepts its water neighbor in either form, so the probe has to record the
-     * flowing one as an alternative for the scene to draw the neighbor flowing.
+     * Vanilla's cobblestone interaction accepts its water neighbor in either form. So the probe must record the
+     * flowing form as an alternative. Then the scene can draw the neighbor flowing.
      */
     private static void checkFlowingNeighbor(List<FluidInteractionRecipe> found) {
         BlockState result = Blocks.COBBLESTONE.defaultBlockState();
@@ -302,8 +304,9 @@ public final class JeiAutoTest {
     }
 
     /**
-     * Vanilla's stone comes out of lava's own spread code rather than the interaction registry, so it exists only
-     * when the spread probe ran: lava with water directly below it and both water forms cycling in one slot.
+     * Vanilla's stone comes from lava's own spread code, not the interaction registry. So it exists only when
+     * the spread probe ran. The recipe holds lava with water directly below it, and both water forms cycle in
+     * one slot.
      */
     private static void checkSpreadRecipe(List<FluidInteractionRecipe> found) {
         BlockState stone = Blocks.STONE.defaultBlockState();
@@ -334,8 +337,8 @@ public final class JeiAutoTest {
     }
 
     /**
-     * Within one fluid type the display order ranks owners, so vanilla's stone — owned by {@code minecraft} and
-     * found by the spread probe — has to precede every {@code minecraft:lava} recipe owned by a third party,
+     * Within one fluid type, the display order ranks owners. Vanilla's stone is owned by {@code minecraft} and
+     * found by the spread probe. So it must precede every {@code minecraft:lava} recipe owned by a third party,
      * including the dev-only ones registered here.
      */
     private static void checkOwnerOrder(List<FluidInteractionRecipe> found) {
@@ -370,9 +373,9 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dev fluid hardens a lava-tagged fluid below it only as a source block, so its spread recipe has to
-     * carry the source state alone with the flowing state recorded as inert, and the line the source slot shows
-     * has to name that flowing form. Vanilla's stone comes out of both lava forms, so it records nothing inert.
+     * The dev fluid hardens a lava-tagged fluid below it only as a source block. So its spread recipe must carry
+     * the source state alone, with the flowing state recorded as inert. The line the source slot shows must name
+     * that flowing form. Vanilla's stone comes from both lava forms, so it records nothing inert.
      */
     private static void checkFormDifference(List<FluidInteractionRecipe> found) {
         BlockState result = JeiAutoTestFluids.RESULT.defaultBlockState();
@@ -412,10 +415,11 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dev water-tagged fluid has a registered interaction of its own with a lava neighbor, which a level runs
-     * on the block update that placing the lava sends, long before lava's spread tick reaches the fluid below it.
-     * Lava's own spread code would turn it to stone like any other water-tagged fluid and never gets the chance,
-     * so it belongs in a recipe of its own rather than among the alternatives of vanilla's stone.
+     * The dev water-tagged fluid has a registered interaction of its own with a lava neighbor. A level runs it
+     * on the block update that the placed lava sends. That is long before lava's spread tick reaches the fluid
+     * below it. Lava's own spread code can turn a water-tagged fluid to stone. Here, that code never gets the
+     * chance to run. So this result belongs in a recipe of its own. It is not among the alternatives of
+     * vanilla's stone recipe.
      */
     private static void checkPreempted(List<FluidInteractionRecipe> found) {
         Fluid dyed = JeiAutoTestFluids.dyedSourceFluid();
@@ -448,13 +452,14 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The Bumblezone's sugar water hardens inside its liquid block's {@code neighborChanged}, which a level runs
-     * on the tick a lava-tagged fluid is placed against it and which no fluid tick and no registry entry
-     * describes. Its source form becomes sugar-infused stone and its flowing form sugar-infused cobblestone, from
-     * every lava-tagged neighbor in either form, beside the source and above it but never below it. Because that
-     * happens before any spread tick, the fluids whose spread would otherwise reach sugar water never do. Lava
-     * itself reaches the sugar water beside it through a registry interaction of its own first, so it stays an
-     * alternative of the above-position recipes alone.
+     * The Bumblezone's sugar water hardens inside its liquid block's {@code neighborChanged} method. A level
+     * runs this method on the tick a lava-tagged fluid lands against it. No fluid tick and no registry entry
+     * describes this hardening. From its source form, the sugar water becomes sugar-infused stone. From its
+     * flowing form, it becomes sugar-infused cobblestone. Both results come from every lava-tagged neighbor, in
+     * either form. This occurs beside the source and above it. It never occurs below the source. This hardening
+     * happens before any spread tick. So other fluids never reach the sugar water through their own spread. Lava
+     * itself reaches the sugar water beside it first, through a registry interaction of its own. So lava stays
+     * an alternative of the above-position recipes alone.
      */
     private static void checkNeighborRecipe(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
@@ -520,12 +525,13 @@ public final class JeiAutoTest {
     }
 
     /**
-     * A registry interaction registered on lava's own fluid type consumes the lava before sugar water's update
-     * hook is told about it, and only where that interaction looks: with lava beside it the sugar water is left
-     * alone and the lava becomes obsidian or sugar-infused cobblestone, while with lava above it, which the
-     * interaction on the lava block never looks down from, the sugar water hardens from every form the probe
-     * verified. So among the recipes that harden the sugar water itself, those whose neighbor sits beside it hold
-     * neither form of lava and those whose neighbor sits above it hold both.
+     * A registry interaction runs on lava's own fluid type. It consumes the lava before sugar water's update
+     * hook learns about it. This happens only where that interaction looks. With lava beside the sugar water,
+     * the sugar water stays unchanged, and the lava becomes obsidian or sugar-infused cobblestone. The
+     * interaction on the lava block never looks downward. So with lava above the sugar water, the sugar water
+     * hardens instead, from every form the probe verified. Among the recipes that harden the sugar water itself:
+     * the ones with a neighbor beside it hold neither form of lava. The ones with a neighbor above it hold both
+     * forms.
      */
     private static void checkNeighborRegistryPreempted(ResourceLocation result, @Nullable FluidInteractionRecipe above,
                                                        @Nullable FluidInteractionRecipe beside) {
@@ -590,12 +596,12 @@ public final class JeiAutoTest {
 
     /**
      * Every recipe describes what its own rule does. Sugar water's update hook writes into the sugar water
-     * itself, so none of that hook's recipes writes at a lava neighbor: what a level leaves where lava stood
-     * beside sugar water comes from a registry interaction on the lava, whose own recipes carry it.
-     * Lava and the tar both write stone into a water-tagged fluid below them from their spread code, so a spread
-     * recipe of either holding such a fluid among its alternatives writes stone at that fluid and nothing
-     * anywhere else; anything else a level reaches from the same arrangement is some other rule's outcome and
-     * belongs to that rule's recipe.
+     * itself. So none of that hook's recipes writes at a lava neighbor. What a level leaves where lava stood
+     * beside sugar water comes from a registry interaction on the lava instead. That interaction's own recipes
+     * carry this result. Lava and the tar both write stone into a water-tagged fluid below them, from their own
+     * spread code. So a spread recipe of either fluid, if it holds such a water-tagged fluid as an alternative,
+     * writes stone at that fluid and nothing else. Anything else a level reaches from the same arrangement is
+     * another rule's outcome. That outcome belongs to that other rule's recipe.
      */
     private static void checkOwnRule(List<FluidInteractionRecipe> found) {
         List<String> consumed = found.stream()
@@ -645,8 +651,8 @@ public final class JeiAutoTest {
     }
 
     /**
-     * Sugar water hardens on the tick a lava-tagged fluid is placed against it, so that fluid's own spread tick
-     * never reaches it: neither form may still be an alternative of a spread recipe.
+     * Sugar water hardens on the tick a lava-tagged fluid lands against it. So that fluid's own spread tick
+     * never reaches it. Neither form of it can still be an alternative of a spread recipe.
      */
     private static void checkSugarWaterGone(@Nullable FluidInteractionRecipe recipe, String which) {
         if (recipe == null) {
@@ -675,9 +681,9 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dev fluid's source slot always carries the inert-form indicator (a "?" over its top-right corner)
-     * because its only source fluid has an inert flowing form recorded. Its neighbor slot carries none: hardening
-     * the lava-tagged target does not depend on that target's own form, so neither of its forms is ever inert.
+     * The dev fluid's source slot always carries the inert-form indicator (a "!" at its top-left corner). Its
+     * only source fluid has an inert flowing form recorded. Its neighbor slot carries no indicator. Hardening
+     * the lava-tagged target does not depend on that target's own form. So neither of its forms is ever inert.
      */
     private static void checkIndicator() {
         if (formRecipe == null) {
@@ -695,10 +701,11 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The glistering honey crystal a honey source under still water becomes has an {@code onPlace} of its own
-     * that turns that water into sugar water, so the level writes at two positions from the one arrangement.
-     * Neither the honey's update hook nor any registry entry says so on its own; only settling the arrangement
-     * does, and the recipe has to carry both results for the scene to draw what a player would see.
+     * A honey source under still water becomes a glistering honey crystal. That crystal has its own
+     * {@code onPlace} method, which turns the water into sugar water. So the level writes at two positions from
+     * the one arrangement. Neither the honey's update hook nor any registry entry states this on its own. Only
+     * settling the arrangement reveals it. So the recipe must carry both results, for the scene to draw what a
+     * player sees.
      */
     private static void checkCascade(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
@@ -722,10 +729,10 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dripstone beside the dev fluid is the probed neighbor, so the interaction's own write at that offset
-     * waterlogs it in place; the write survives settling because it carries a fluid other than the one the
-     * arrangement poured, and it must carry {@link BlockStateProperties#WATERLOGGED} for the scene to draw a
-     * block whose model offset and fluid share one cell.
+     * The dripstone beside the dev fluid is the probed neighbor. So the interaction's own write at that offset
+     * waterlogs it in place. This write survives settling because it carries a fluid other than the one the
+     * arrangement poured. It must carry {@link BlockStateProperties#WATERLOGGED} so the scene can draw a block
+     * whose model offset and fluid share one cell.
      */
     private static void checkOffsetRecipe(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
@@ -751,9 +758,9 @@ public final class JeiAutoTest {
     }
 
     /**
-     * The dev interaction registered on lava for a water neighbor is answered by the interaction registered on
-     * lava before it, whatever the arrangement, so it produces no recipe of its own. Its failure recipe has to
-     * name what a level holds there instead rather than say only that it could not be processed.
+     * An earlier interaction, registered on lava before this dev interaction, always answers first, whatever the
+     * arrangement. So this dev interaction produces no recipe of its own. Its failure recipe must name what a
+     * level holds there instead. It must not simply state that processing failed.
      */
     private static void checkPreemptedInteraction(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
@@ -782,10 +789,10 @@ public final class JeiAutoTest {
     }
 
     /**
-     * Biomes O' Plenty registers its blood interaction on every fluid type, The Bumblezone's honey among them.
-     * The honey's own block class answers the block update that placing the blood sends, so a level holds the
-     * honey where that interaction writes flesh. Its failure recipe has to name both fluids and both blocks,
-     * which is the same text as the dev fixture's over an arrangement nothing here set up.
+     * Biomes O' Plenty registers its blood interaction on every fluid type, including The Bumblezone's honey.
+     * The honey's own block class answers the block update that the placed blood sends. So a level holds the
+     * honey where that interaction writes flesh. Its failure recipe must name both fluids and both blocks. That
+     * text matches the dev fixture's, over an arrangement nothing here set up.
      */
     private static void checkPreemptedThirdPartyInteraction(List<FluidInteractionRecipe> found) {
         String blood = fluidName(BLOOD);

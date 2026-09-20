@@ -23,17 +23,17 @@ import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInforma
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
- * Discovers every fluid interaction by running it inside one {@link SandboxLevel}, and turns the findings into
- * recipes.
+ * Discovers every fluid interaction. It runs each one inside one {@link SandboxLevel} and turns the findings
+ * into recipes.
  *
  * <p>Three tiers generate candidates. {@link RegistryProber} runs every {@link FluidInteractionRegistry} entry.
  * {@link SpreadProber} ticks the fluids that declare spread code of their own. {@link NeighborProber} calls the
- * update hooks of the liquid blocks that declare them. Each tier calls one rule by hand and keeps what that rule
- * alone wrote. {@link Settler} then builds every hit with the semantics of a level and decides the result.
+ * update hooks of the liquid blocks that declare them. Each tier calls one rule by hand. It keeps what that rule
+ * alone writes. {@link Settler} then builds every hit with the semantics of a level and decides the result.
  *
  * <p>The tiers can propose the same physical arrangement. {@link #arrangementKey} keeps the first tier's recipe:
  * the registry, then the neighbor tier, then the spread tier. {@link RecipeMerger} then collapses recipes that
- * describe one pattern, and {@link #byOwner} sets the display order.
+ * describe one pattern. {@link #byOwner} sets the display order.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -50,9 +50,9 @@ public final class InteractionProber {
 
     /**
      * Probes every fluid type in {@link RecipeIds#LOCATION_ORDER}. Inside one type, owner groups rank in
-     * {@link RecipeIds#OWNER_ORDER}, and inside one owner every registry recipe precedes every spread recipe,
-     * which precedes every neighbor recipe. The tiers assign the recipe ids before that regrouping, so the ids
-     * never depend on it.
+     * {@link RecipeIds#OWNER_ORDER}. Inside one owner, every registry recipe comes before every spread recipe.
+     * Every spread recipe comes before every neighbor recipe. The tiers assign the recipe ids before that
+     * regrouping. So the ids never depend on it.
      */
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
@@ -125,8 +125,8 @@ public final class InteractionProber {
     }
 
     /**
-     * The types worth probing: the ones a level can hold a fluid of. A type whose every fluid lacks a block can
-     * stand nowhere, so none of its interactions is probed.
+     * The types worth probing: the ones a level can hold a fluid of. A type whose every fluid has no block can
+     * stand nowhere. So no tier probes its interactions.
      */
     private static List<FluidType> probable(List<FluidType> types, Map<FluidType, List<InteractionInformation>> registered) {
         List<FluidType> probable = new ArrayList<>(types.size());
@@ -176,8 +176,8 @@ public final class InteractionProber {
 
     /**
      * The physical arrangement a recipe describes: the fluid placed last, what stands where, and nothing about
-     * the tier that found it. Every tier settles the arrangement, so the results are a function of it, and two
-     * tiers that propose the same one reach the same answer. The first tier's attribution wins.
+     * the tier that found it. Every tier settles the arrangement. The results are thus a function of it. Two
+     * tiers that propose the same arrangement reach the same answer. The first tier's attribution wins.
      */
     private static Object arrangementKey(FluidInteractionRecipe recipe) {
         return List.of(Set.copyOf(recipe.sources()), Set.copyOf(recipe.neighbors()), recipe.neighborOffset(),
@@ -185,10 +185,10 @@ public final class InteractionProber {
     }
 
     /**
-     * The recipes of one fluid type from all three tiers as one list: owner groups in
-     * {@link RecipeIds#OWNER_ORDER}, and inside one owner every registry recipe, then every spread recipe, then
-     * every neighbor recipe, each in its own order. The inputs carry their ids and are grouped by owner in that
-     * order already, so this changes no recipe, id or number.
+     * The recipes of one fluid type from all three tiers as one list. Owner groups rank in
+     * {@link RecipeIds#OWNER_ORDER}. Inside one owner come every registry recipe, then every spread recipe, then
+     * every neighbor recipe, each in its own order. The inputs carry their ids already. The tiers group them by
+     * owner in that order already. So this changes no recipe, id or number.
      */
     private static List<FluidInteractionRecipe> byOwner(List<FluidInteractionRecipe> registry,
                                                         List<FluidInteractionRecipe> spread,

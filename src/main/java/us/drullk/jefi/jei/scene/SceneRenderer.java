@@ -27,10 +27,11 @@ import net.minecraft.util.profiling.ProfilerFiller;
  * Draws a baked scene into a rectangle of the current GUI through an orthographic camera orbiting the source
  * position.
  *
- * <p>This deliberately uses Gander's bakery output and section renderer directly instead of its screen pipeline:
- * that pipeline allocates a window-sized render target plus an eight-layer translucency chain per widget, which
- * is far too heavy for a JEI page that shows several recipes at once. Here the geometry is drawn straight into
- * the main framebuffer through a viewport, with depth cleared only inside the widget's scissor rectangle.
+ * <p>This class deliberately uses Gander's bakery output and section renderer directly, instead of its screen
+ * pipeline. That pipeline allocates a window-sized render target, plus an eight-layer translucency chain, per
+ * widget. This is far too heavy for a JEI page that shows several recipes at once. Here the code draws the
+ * geometry straight into the main framebuffer, through a viewport. It clears the depth buffer only inside the
+ * widget's scissor rectangle.
  */
 public final class SceneRenderer {
     /** Azimuth that puts the camera on the neighbor's side of the source, off-axis enough to see the whole row. */
@@ -40,7 +41,7 @@ public final class SceneRenderer {
     private static final float VIEW_DISTANCE = 50.0f;
     private static final float NEAR = 1.0f;
     private static final float FAR = 100.0f;
-    /** Translucency is sorted from far away so the ordering matches a parallel projection. */
+    /** The code sorts translucency from far away, so the ordering matches a parallel projection. */
     private static final float SORT_DISTANCE = 1000.0f;
 
     private static final List<RenderType> OPAQUE_LAYERS = List.of(RenderType.solid(), RenderType.cutoutMipped(), RenderType.cutout());
@@ -49,12 +50,13 @@ public final class SceneRenderer {
     }
 
     /**
-     * <p>The widget leaves no depth behind: its depth values are cleared again after it draws, so anything JEI
-     * draws later at this position wins the depth test regardless of how close the scene geometry came to camera.
+     * <p>The widget leaves no depth behind. The code clears its depth values again after it draws. So anything
+     * JEI draws later at this position wins the depth test, regardless of how close the scene geometry came to
+     * the camera.
      *
-     * @param graphics the GUI graphics, whose pose must already be translated to the widget's top-left corner
-     * @param width    widget width in GUI units
-     * @param height   widget height in GUI units
+     * @param graphics the GUI graphics, whose pose must already be translated to the widget's top-left corner.
+     * @param width    widget width in GUI units.
+     * @param height   widget height in GUI units.
      */
     public static void draw(GuiGraphics graphics, SceneCache.BakedScene scene, int width, int height, float yaw, float pitch) {
         Minecraft mc = Minecraft.getInstance();
@@ -62,7 +64,8 @@ public final class SceneRenderer {
         Matrix4f pose = graphics.pose().last().pose();
         double scale = window.getGuiScale();
 
-        // The pose is translated to the widget's top-left corner; GuiGraphics' scissor wants absolute GUI coordinates.
+        // The pose is translated to the widget's top-left corner.
+        // GuiGraphics' scissor wants absolute GUI coordinates.
         int guiX = Math.round(pose.m30());
         int guiY = Math.round(pose.m31());
         int viewportX = (int) Math.floor(guiX * scale);

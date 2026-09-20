@@ -17,24 +17,25 @@ import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInforma
 import net.neoforged.neoforge.fluids.FluidType;
 
 /**
- * Development-only fluid interactions registered when the smoke test is enabled, so the JEI category can be
- * checked against cases the bundled mods do not provide: an interaction that can never be exercised (the
- * "Unable to process" fallback), one whose predicate inspects two positions (the multi-position search), one
- * whose predicate does the work itself and registers an empty action, a set that must collapse into a single
- * recipe through both of {@code RecipeMerger}'s passes, one registered on a water-tagged fluid for a lava
- * neighbor, which a level runs before lava's spread tick, so settling leaves that fluid out of vanilla's stone
- * recipe, and one on lava for a water neighbor, which a level answers with the interaction registered before it.
+ * Development-only fluid interactions. The smoke test registers them when it is enabled. The smoke test uses
+ * them to check the JEI category against cases the bundled mods do not provide. One interaction can never be
+ * exercised, for the "Unable to process" fallback. One interaction's predicate inspects two positions, for the
+ * multi-position search. One interaction's predicate does the work itself and registers an empty action. One
+ * set of interactions must collapse into a single recipe, through both of {@code RecipeMerger}'s passes. One
+ * interaction is registered on a water-tagged fluid for a lava neighbor. A level runs it before lava's spread
+ * tick, so settling leaves that fluid out of vanilla's stone recipe. One interaction is registered on lava for
+ * a water neighbor. A level answers it with the interaction registered before it.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
     private static final boolean ENABLED = AutoTestWorld.FIXTURES;
 
-    /** Neighbors of the mergeable interactions; each is registered for every type in {@link #MERGE_TYPES}. */
+    /** Neighbors of the mergeable interactions. Each one is registered for every type in {@link #MERGE_TYPES}. */
     static final List<Block> MERGE_NEIGHBORS = List.of(Blocks.HAY_BLOCK, Blocks.DRIED_KELP_BLOCK);
     static final List<Holder<FluidType>> MERGE_TYPES = List.of(NeoForgeMod.WATER_TYPE, NeoForgeMod.LAVA_TYPE);
     static final Block MERGE_RESULT = Blocks.MOSS_BLOCK;
 
-    /** What the lava interaction registered last writes, and a level never holds, because an earlier one answers first. */
+    /** The block the last-registered lava interaction writes. A level never holds this block, because an earlier interaction answers first. */
     static final Block PREEMPTED_RESULT = Blocks.BLACKSTONE;
 
     /** Results of the dev fluid's own lava interaction, one per source form, as a colored water mod registers them. */
@@ -63,7 +64,7 @@ public final class JeiAutoTestInteractions {
                     (level, pos, relativePos, state) -> level.getBlockState(pos.above()).is(Blocks.MAGMA_BLOCK)
                             && level.getBlockState(relativePos).is(Blocks.SAND),
                     Blocks.GLASS.defaultBlockState()));
-            // Water beside a bone block becomes clay, written by the predicate with nothing left for the action.
+            // Water beside a bone block becomes clay. The predicate writes it, leaving nothing for the action.
             FluidInteractionRegistry.addInteraction(NeoForgeMod.WATER_TYPE.value(), new InteractionInformation(
                     (level, pos, relativePos, state) -> {
                         if (!level.getBlockState(relativePos).is(Blocks.BONE_BLOCK)) {
@@ -73,8 +74,8 @@ public final class JeiAutoTestInteractions {
                         return true;
                     },
                     (level, pos, relativePos, state) -> {}));
-            // The dev water-tagged fluid reacting to lava beside it, a different block per source form. A level
-            // runs this on the block update that placing the lava sends, before lava's spread tick reaches it.
+            // The dev water-tagged fluid reacts to lava beside it, with a different block per source form. A
+            // level runs this on the block update that placing the lava sends, before lava's spread tick reaches it.
             FluidInteractionRegistry.addInteraction(JeiAutoTestFluids.dyedType(), new InteractionInformation(
                     (level, pos, relativePos, state) -> level.getFluidState(relativePos).getFluidType() == NeoForgeMod.LAVA_TYPE.value(),
                     (level, pos, relativePos, state) -> level.setBlock(pos,
@@ -87,9 +88,10 @@ public final class JeiAutoTestInteractions {
                             MERGE_RESULT.defaultBlockState()));
                 }
             }
-            // The dev water-tagged fluid beside a pointed dripstone waterlogs it with plain water rather than
-            // itself: a random-offset block sharing its cell with a fluid, for the scene renderer, whose write a
-            // settled level keeps because the fluid it holds is not one the arrangement itself poured.
+            // The dev water-tagged fluid beside a pointed dripstone waterlogs it with plain water, not with
+            // itself. The dripstone is a random-offset block that shares its cell with a fluid, the fixture for
+            // the scene renderer. A settled level keeps this write, because the fluid it holds is not one the
+            // arrangement itself poured.
             FluidInteractionRegistry.addInteraction(JeiAutoTestFluids.dyedType(), new InteractionInformation(
                     (level, pos, relativePos, state) -> level.getBlockState(relativePos).is(OFFSET_CONDITION),
                     (level, pos, relativePos, state) -> {
@@ -97,8 +99,9 @@ public final class JeiAutoTestInteractions {
                         level.setBlock(relativePos,
                                 OFFSET_CONDITION.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true), Block.UPDATE_ALL);
                     }));
-            // Lava with water beside it, which the interaction registered on lava before this one answers first:
-            // every arrangement settles as that one's result, so this one's failure recipe says what stands there.
+            // This interaction is for lava with water beside it. The interaction registered on lava before this
+            // one answers first, so every arrangement settles as that one's result. This one's failure recipe
+            // states what stands there instead.
             FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
                     (level, pos, relativePos, state) -> level.getFluidState(relativePos).getFluidType() == NeoForgeMod.WATER_TYPE.value(),
                     PREEMPTED_RESULT.defaultBlockState()));

@@ -19,7 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
 /**
- * Draws one phase of a recipe into a widget-local rectangle, re-sorting the baked translucency whenever the
+ * Draws one phase of a recipe into a widget-local rectangle. It re-sorts the baked translucency whenever the
  * orbit angles or the shown alternatives changed since the last draw.
  *
  * <p>Runs on the render thread, like everything that touches a baked scene.
@@ -47,8 +47,8 @@ public final class SceneView {
 
     /**
      * The placements of one phase. A line is white when it differs from the same offset in the recipe's other
-     * phase, gray when that phase places the same thing there, so a long list shows what the interaction actually
-     * changed at a glance.
+     * phase. A line is gray when that phase places the same thing there. So a long list shows what the
+     * interaction actually changed, at a glance.
      */
     public static void tooltip(ITooltipBuilder tooltip, FluidInteractionRecipe recipe, SceneVariant variant) {
         tooltip.add(Texts.key(variant.after() ? "after" : "before").withStyle(ChatFormatting.GRAY));
@@ -76,8 +76,8 @@ public final class SceneView {
     }
 
     /**
-     * @param version increments whenever the angles change, so a scene can tell whether its sort is still current
-     * @param settled whether the angles have stopped moving; re-sorting mid-drag is not worth its cost
+     * @param version increments whenever the angles change. A scene uses it to tell whether its sort is still current.
+     * @param settled whether the angles stopped moving. Re-sorting mid-drag is not worth its cost.
      */
     void draw(GuiGraphics graphics, SceneVariant variant, int width, int height, float yaw, float pitch, int version, boolean settled) {
         graphics.fill(0, 0, width, height, BACKDROP);

@@ -14,12 +14,12 @@ import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.world.level.material.Fluid;
 
 /**
- * A yellow "?" drawn over a slot's top-right corner while the fluid it currently displays has an inert other
- * form, so the observational tooltip line ({@link Texts#inertSource} / {@link Texts#inertNeighbor}) is visible
- * without hovering.
+ * A yellow "!" appears at a slot's top-left corner. It appears while the fluid the slot displays has an
+ * inert other form. This makes the observational tooltip line ({@link Texts#inertSource} /
+ * {@link Texts#inertNeighbor}) visible without hovering.
  *
- * <p>{@link mezz.jei.api.gui.builder.IRecipeSlotBuilder#setOverlay} is static per slot and cannot follow a slot's
- * cycling, so this reads the slot's currently displayed ingredient every frame the way {@code SceneWidget} does.
+ * <p>{@link mezz.jei.api.gui.builder.IRecipeSlotBuilder#setOverlay} is static per slot. It cannot follow a
+ * slot's cycling. So this class reads the slot's current ingredient every frame, the way {@code SceneWidget} does.
  */
 public final class InertFormIndicator implements IRecipeWidget {
     private static final String GLYPH = "!";
@@ -37,7 +37,7 @@ public final class InertFormIndicator implements IRecipeWidget {
     }
 
     /**
-     * Null when none of the source slot's fluids ever have an inert source form recorded, so no per-frame check
+     * Null when none of the source slot's fluids has an inert source form recorded. Then no per-frame check
      * is worth doing.
      */
     static @Nullable InertFormIndicator forSource(IRecipeSlotView slot, FluidInteractionRecipe recipe, int cornerX, int cornerY) {
@@ -45,19 +45,19 @@ public final class InertFormIndicator implements IRecipeWidget {
     }
 
     /**
-     * Null when none of the neighbor slot's fluids ever have an inert alternative recorded, so no per-frame check
+     * Null when none of the neighbor slot's fluids has an inert alternative recorded. Then no per-frame check
      * is worth doing.
      */
     static @Nullable InertFormIndicator forNeighbor(IRecipeSlotView slot, FluidInteractionRecipe recipe, int cornerX, int cornerY) {
         return neighborMayShow(recipe) ? new InertFormIndicator(slot, recipe, true, cornerX, cornerY) : null;
     }
 
-    /** Whether any of the recipe's source fluids ever has an inert source form, i.e. whether a source widget could ever draw. */
+    /** Whether any of the recipe's source fluids has an inert source form. This decides whether a source widget can ever draw. */
     public static boolean sourceMayShow(FluidInteractionRecipe recipe) {
         return recipe.sourceFluids().stream().anyMatch(fluid -> recipe.inert().sourceOf(fluid) != null);
     }
 
-    /** Whether any of the recipe's neighbor fluids ever has an inert alternative, i.e. whether a neighbor widget could ever draw. */
+    /** Whether any of the recipe's neighbor fluids has an inert alternative. This decides whether a neighbor widget can ever draw. */
     public static boolean neighborMayShow(FluidInteractionRecipe recipe) {
         return recipe.neighbors().stream()
                 .filter(Placement::isFluid)

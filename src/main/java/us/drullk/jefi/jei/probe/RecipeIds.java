@@ -16,8 +16,8 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  * The order of recipes and the ids they carry.
  *
  * <p>JEI keeps bookmarks by recipe id, so an id must stay the same across launches. NeoForge runs mod setup in
- * parallel, so the registration index of an interaction changes between launches. The ids therefore rank fluid
- * types and owners by namespace, and number the recipes inside one owner in an order that the results decide.
+ * parallel, so the registration index of an interaction changes between launches. So the ids rank fluid types
+ * and owners by namespace. Inside one owner, the results decide the number of a recipe.
  */
 public final class RecipeIds {
     private static final String MINECRAFT = "minecraft";
@@ -52,7 +52,7 @@ public final class RecipeIds {
 
     /**
      * The owner as one id segment. A mod id holds only characters that are legal in a path. Every other
-     * character becomes {@code _}, so an unexpected owner id can not split the id into more segments.
+     * character becomes {@code _}. An unexpected owner id thus can not split the id into more segments.
      */
     static String ownerSegment(@Nullable String owner) {
         String raw = owner != null ? owner : "unknown";
@@ -67,8 +67,8 @@ public final class RecipeIds {
 
     /**
      * One recipe id. The tier segment is empty for the registry tier, {@code spread/} for the spread tier and
-     * {@code neighbor/} for the neighbor tier. Then come the type's namespace and path, the owner segment, the
-     * number of the rule in its owner group and the number of the variant.
+     * {@code neighbor/} for the neighbor tier. Then come the namespace and path of the type. Then come the owner
+     * segment, the number of the rule in its owner group, and the variant number.
      */
     static ResourceLocation id(String tier, ResourceLocation typeKey, String ownerSegment, int n, int variant) {
         return ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID,

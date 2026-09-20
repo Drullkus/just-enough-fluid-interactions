@@ -29,18 +29,18 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * The registry tier: runs every {@link FluidInteractionRegistry} entry of one fluid type in the sandbox.
  *
- * <p>An interaction is an opaque predicate and action. For each source state the tier places the fluid at
- * {@link SandboxLevel#ORIGIN} and calls the pair with every fluid candidate as the neighbor, in both forms, then
- * with every block candidate as the neighbor. Only when nothing fires, a greedy multi-position search runs: the
- * sandbox records the positions the predicate reads, and the search fixes the first unfixed one with each
- * candidate in turn. A candidate that satisfies the predicate wins. A candidate that makes the predicate read a
- * new position stays, because short-circuit evaluation shows that an earlier clause passed.
+ * <p>An interaction is an opaque predicate and action. For each source state, the tier places the fluid at
+ * {@link SandboxLevel#ORIGIN}. It then calls the pair with every fluid candidate as the neighbor, in both forms.
+ * It then calls the pair with every block candidate as the neighbor. A greedy multi-position search runs only
+ * when nothing fires. The sandbox records the positions the predicate reads. The search fixes the first unfixed
+ * position with each candidate in turn. A candidate that satisfies the predicate wins. A candidate that makes
+ * the predicate read a new position stays, because short-circuit evaluation shows that an earlier clause passed.
  *
  * <p>A hit is the arrangement and the writes of the interaction itself. Writes from the predicate count too,
  * because some mods do the work there and register an empty action. {@link Settler} builds every hit with the
- * semantics of a level. An interaction whose every arrangement a different rule pre-empts becomes a failure
- * recipe that states the observation ({@link Texts#preempted}). An interaction that never fires, or whose
- * arrangements settle without a result, becomes an "Unable to process" failure recipe.
+ * semantics of a level. A different rule can pre-empt every arrangement of an interaction. That interaction
+ * becomes a failure recipe that states the observation ({@link Texts#preempted}). An interaction that never
+ * fires, or whose arrangements settle without a result, becomes an "Unable to process" failure recipe.
  */
 final class RegistryProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -70,7 +70,7 @@ final class RegistryProber {
 
     /**
      * Every recipe of the registered interactions of one type, with ids. Owner groups rank by
-     * {@link RecipeIds#OWNER_ORDER}. In a group the interactions rank by {@link #WITHIN_OWNER_ORDER}, and the
+     * {@link RecipeIds#OWNER_ORDER}. In a group, the interactions rank by {@link #WITHIN_OWNER_ORDER}. The
      * position of an interaction in its group is the {@code n} of its ids. Variants keep their discovery order.
      */
     List<FluidInteractionRecipe> probe(FluidType type, List<InteractionInformation> interactions) {
@@ -143,8 +143,8 @@ final class RegistryProber {
 
     /**
      * Places the arrangement, runs the predicate and, when it passes, the action. An interaction that writes
-     * nothing never fired. What it wrote is not the answer: it is the sign that the arrangement is one to settle,
-     * and the measure the settled level is held against.
+     * nothing did not fire. What it wrote is not the answer. It is the sign that the arrangement is one to
+     * settle. It is also the measure for the settled level.
      */
     private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
         Run run = run(interaction, source, requirements);
@@ -188,7 +188,7 @@ final class RegistryProber {
 
     /**
      * The greedy multi-position search for one source state. Each round takes the first position the predicate
-     * read that is not fixed yet and tries every candidate there.
+     * read that is not fixed yet. It tries every candidate there.
      */
     private final class Search {
         private final InteractionInformation interaction;
@@ -349,7 +349,7 @@ final class RegistryProber {
 
     /**
      * One arrangement worth settling, in sandbox positions: what stands where, and what the interaction itself
-     * wrote there, which the settled level must agree with for the outcome to be this interaction's.
+     * wrote there. The settled level must agree with those writes before the outcome is this interaction's.
      */
     private record Hit(Map<BlockPos, Placement> requirements, Map<BlockPos, BlockState> writes, boolean wroteFromPredicate) {
         @Nullable Placement neighbor() {
@@ -397,8 +397,8 @@ final class RegistryProber {
     }
 
     /**
-     * The result of one interaction before it has an id: one failure recipe, or one recipe per outcome group in
-     * discovery order, and what {@link #order} needs to place it.
+     * The result of one interaction before it has an id. This is one failure recipe, or one recipe per outcome
+     * group in discovery order. It also holds what {@link #order} needs to place it.
      */
     private record ProbedInteraction(int registrationIndex, @Nullable String owner, List<FluidInteractionRecipe> recipes) {
         boolean isFailure() {

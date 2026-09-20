@@ -10,10 +10,10 @@ import net.minecraft.client.gui.GuiGraphics;
 /**
  * One recipe phase drawn as a scene that nothing but the category can turn.
  *
- * <p>A drawable is positioned by whoever draws it and is never asked for a tooltip or offered input, so this is
- * what a recipe layout gets where {@link SceneWidget} cannot work; the variant comes from whatever slot view the
- * category was last drawn with, so the picture and the category's tooltip agree, and the angles come from the
- * rotation the category steps on a click.
+ * <p>A drawable is positioned by whoever draws it. JEI never asks a drawable for a tooltip or offers it input.
+ * So a recipe layout uses a drawable where {@link SceneWidget} cannot work. The variant comes from whatever
+ * slot view the category was last drawn with. This keeps the picture and the category's tooltip in agreement.
+ * The angles come from the rotation that the category steps on a click.
  */
 public final class SceneDrawable implements IDrawable {
     private final SceneView view;

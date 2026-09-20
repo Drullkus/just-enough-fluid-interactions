@@ -17,11 +17,11 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * Read access to {@link FluidInteractionRegistry}'s private interaction map.
  *
- * <p>The mod ships an access transformer that makes the field public at runtime, in development and production
- * alike. It cannot be referenced directly in source, though: ModDevGradle applies access transformers while
- * recompiling Minecraft's sources, and NeoForge's own classes are merged in afterwards untouched, so the compiler
- * still sees the field as private. A reflective lookup bridges that gap. It prefers the transformed public field
- * and only falls back to {@code setAccessible} when the transformer was not applied.
+ * <p>The mod ships an access transformer. The transformer makes the field public at runtime, in development and
+ * in production. The source still cannot name the field directly. ModDevGradle applies access transformers while
+ * it recompiles Minecraft's sources. It then merges NeoForge's own classes in without a change. So the compiler
+ * still sees the field as private. A reflective lookup bridges that gap. It prefers the transformed public
+ * field. It falls back to {@code setAccessible} only when the transformer did not apply.
  */
 public final class RegisteredInteractions {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -30,7 +30,7 @@ public final class RegisteredInteractions {
     private RegisteredInteractions() {
     }
 
-    /** The live registry map, or an empty map when it could not be read. */
+    /** The live registry map, or an empty map when the lookup failed. */
     public static Map<FluidType, List<InteractionInformation>> get() {
         return INTERACTIONS != null ? INTERACTIONS : Map.of();
     }

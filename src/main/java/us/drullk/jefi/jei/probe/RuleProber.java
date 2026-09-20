@@ -31,16 +31,17 @@ import net.neoforged.neoforge.fluids.FluidType;
  *
  * <p>The source fluid sits at {@link SandboxLevel#ORIGIN} and one candidate sits at one target position. The
  * tier calls the rule's hook in the quiet sandbox and reads what the hook wrote. A write that is not air and not
- * a state of a fluid in the arrangement is a hit. The hook call is a filter, not an answer: {@link Settler}
- * builds every hit with the semantics of a level, and what the level settles on is the recipe. The writes of
- * the hook are also the measure: when the settled level holds something different where the hook wrote, a
- * different rule owns that outcome, so the tier drops the arrangement.
+ * a state of a fluid in the arrangement is a hit. The hook call is a filter and not an answer. {@link Settler}
+ * builds every hit with the semantics of a level. What the level settles on is the recipe. The writes of the
+ * hook are also the measure. The settled level can hold something different where the hook wrote. A different
+ * rule then owns that outcome, and the tier drops the arrangement.
  *
- * <p>Only a fluid whose own classes declare the hook is probed ({@link #declaresHook}). The config value
+ * <p>The tier probes only a fluid whose own classes declare the hook ({@link #declaresHook}). The config value
  * {@code forceProbe} adds fluids whose rule lives outside their classes, such as a mixin.
  *
  * <p>Per recipe, the tier records the forms it tried at the same arrangement that produced nothing
- * ({@link InertForms}): the other source form of the recipe's fluid, and the other form of a neighbor fluid.
+ * ({@link InertForms}). These are the other source form of the recipe's fluid, and the other form of a neighbor
+ * fluid.
  */
 public abstract class RuleProber {
     /** The target directly below the source, where vanilla lava changes water into stone. */
@@ -99,7 +100,7 @@ public abstract class RuleProber {
     /** Calls the hook on the source. The sandbox is quiet and records the writes. */
     abstract void callHook(SandboxLevel level, FluidState source, BlockPos target, Placement candidate);
 
-    /** The fluids whose own states are not a result: a hook that writes one of them changes nothing a recipe shows. */
+    /** The fluids whose own states are not a result. A hook that writes one of them changes nothing a recipe shows. */
     abstract Set<Fluid> ownFluids(FluidState source, Placement candidate);
 
     /** The offset whose result block orders the outcomes of one target. */
@@ -125,7 +126,7 @@ public abstract class RuleProber {
 
     /**
      * The names from {@code hooks} that the own classes of {@code start} declare. The walk stops at the first
-     * class {@code isBase} accepts, because that class declares the behavior the fluid inherits.
+     * class {@code isBase} accepts. That class declares the behavior the fluid inherits.
      */
     protected Set<String> declared(Class<?> start, Set<String> hooks, Predicate<Class<?>> isBase) {
         return declaredMethods.computeIfAbsent(start, key -> {
@@ -147,9 +148,9 @@ public abstract class RuleProber {
     }
 
     /**
-     * Every recipe the rule of one fluid type produces: owner groups in {@link RecipeIds#OWNER_ORDER}, then the
-     * target position in probe order, then the result block. A rule that changes nothing yields nothing. There
-     * are no failure recipes here.
+     * Every recipe the rule of one fluid type produces. Owner groups rank in {@link RecipeIds#OWNER_ORDER},
+     * then the target position in probe order, then the result block. A rule that changes nothing gives nothing.
+     * There are no failure recipes here.
      */
     public List<FluidInteractionRecipe> probe(FluidType type, List<FluidState> sources) {
         List<FluidState> probed = probable(sources);
@@ -203,9 +204,9 @@ public abstract class RuleProber {
     }
 
     /**
-     * The forms one outcome was also tried with that wrote nothing: source states of the same fluid that left
-     * every neighbor of the outcome as it was, and the other form of a neighbor fluid that every source state of
-     * the outcome left as it was.
+     * The forms the tier also tried at one outcome and that wrote nothing. These are source states of the same
+     * fluid that left every neighbor of the outcome as it was. They are also the other form of a neighbor fluid
+     * that every source state of the outcome left as it was.
      */
     private InertForms inert(List<FluidState> sources, BlockPos target, Group group) {
         List<FluidState> inertSources = new ArrayList<>();
@@ -258,9 +259,10 @@ public abstract class RuleProber {
 
     /**
      * What a level leaves behind at one arrangement the hook writes in. The hook call of {@link #run} decides
-     * whether the arrangement is worth building. The answer comes from {@link Settler}, so an alternative's
-     * outcome and whether a form is inert are decided the same way. An arrangement whose settled level holds
-     * something different where the hook wrote belongs to a different rule, so the answer for it is empty.
+     * whether the arrangement is worth building. The answer comes from {@link Settler}. So one mechanism decides
+     * the outcome of an alternative and whether a form is inert. The settled level of an arrangement can hold
+     * something different where the hook wrote. That arrangement belongs to a different rule, so the answer for
+     * it is empty.
      */
     private Map<BlockPos, BlockState> settle(FluidState source, BlockPos target, Placement candidate) {
         Map<BlockPos, BlockState> wrote = run(source, target, candidate);
@@ -291,8 +293,8 @@ public abstract class RuleProber {
     }
 
     /**
-     * Places one arrangement, calls the hook, and returns the writes that change a position, keyed by offset
-     * from the source. A write of air, of what was placed, or of an own fluid's state is not a change.
+     * Places one arrangement and calls the hook. Returns the writes that change a position, keyed by offset
+     * from the source. A write of air, of what the tier placed, or of an own fluid's state is not a change.
      */
     private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
         runs++;
@@ -321,8 +323,8 @@ public abstract class RuleProber {
     }
 
     /**
-     * The sandbox scene of one arrangement: the source at the origin, a still source above it when it flows,
-     * bedrock below it unless the target is below, and the candidate at the target.
+     * The sandbox scene of one arrangement. The source sits at the origin. A still source sits above it when it
+     * flows. Bedrock sits below it, unless the target is below. The candidate sits at the target.
      */
     private static Map<BlockPos, Placement> scene(FluidState source, BlockPos target, Placement candidate) {
         Map<BlockPos, Placement> scene = new LinkedHashMap<>();
@@ -406,7 +408,7 @@ public abstract class RuleProber {
     private record Outcome(@Nullable String owner, BlockPos target, Map<BlockPos, BlockState> results) {
     }
 
-    /** One outcome can be reached by several source states and several candidates, so both stay unique. */
+    /** Several source states and several candidates can reach one outcome, so both stay unique. */
     private static final class Group {
         final Set<FluidState> sources = new LinkedHashSet<>();
         final Set<Placement> neighbors = new LinkedHashSet<>();
