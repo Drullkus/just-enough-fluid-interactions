@@ -46,9 +46,14 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  *     read somewhere new, which is what short-circuit evaluation reveals once an earlier clause passes.</li>
  * </ol>
  * Anything that never fires, throws, or writes no block becomes a failure recipe. {@link SpreadProber} then adds
- * what the fluids do on their own, {@link SpreadPreemption} takes back the neighbors a registered interaction
- * consumes before a spread rule can reach them, and recipes describing the same pattern are collapsed by
- * {@link RecipeMerger} once everything has been probed.
+ * what the fluids do on their own and {@link NeighborProber} what their blocks do in their update hooks.
+ *
+ * <p>All three tiers only generate candidates. What each arrangement actually produces comes from
+ * {@link Settler}, which builds it in the sandbox with a level's own semantics and lets every channel run in the
+ * order a level runs them; an arrangement the level settles without a result is dropped, and so is one whose
+ * settled level holds something other than what the proposing rule wrote, because that outcome belongs to
+ * whichever channel reached the arrangement first and to that channel's own recipe. Recipes describing the same
+ * pattern are collapsed by {@link RecipeMerger} once everything has been probed.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -85,6 +90,7 @@ public final class InteractionProber {
             .thenComparingInt(ProbedInteraction::registrationIndex);
 
     private final SandboxLevel level;
+    private final Settler settler;
     /** Neighbor fluids for tier one: each fluid in source form, followed by its flowing form when it has one. */
     private final List<Placement> fluidCandidates;
     private final List<Placement> blockCandidates;
@@ -93,6 +99,7 @@ public final class InteractionProber {
 
     public InteractionProber(RegistryAccess access) {
         this.level = new SandboxLevel(access);
+        this.settler = new Settler(level);
         this.fluidCandidates = new ArrayList<>();
         List<Placement> stillCandidates = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
@@ -128,9 +135,10 @@ public final class InteractionProber {
      * what recipe ids encode, so it stays the same across launches even though NeoForge dispatches mod setup — and
      * therefore fluid interaction registration — in parallel.
      *
-     * <p>What {@link SpreadProber} finds for a type is folded into the same owner groups: within one type the
-     * owner ranking decides the order, and within one owner every registry-derived recipe precedes every
-     * spread-discovered one. Recipe ids are assigned before that regrouping, so they never depend on it.
+     * <p>What {@link SpreadProber} and {@link NeighborProber} find for a type is folded into the same owner
+     * groups: within one type the owner ranking decides the order, and within one owner every registry-derived
+     * recipe precedes every spread-discovered one, which in turn precedes every neighbor-discovered one. Recipe
+     * ids are assigned before that regrouping, so they never depend on it.
      */
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
@@ -154,7 +162,7 @@ public final class InteractionProber {
         long registryNanos = System.nanoTime() - start;
 
         long spreadStart = System.nanoTime();
-        SpreadProber spreadProber = new SpreadProber(level, fluidCandidates, blockCandidates);
+        SpreadProber spreadProber = new SpreadProber(level, settler, fluidCandidates, blockCandidates);
         Map<FluidType, List<FluidInteractionRecipe>> probedSpread = new LinkedHashMap<>();
         for (FluidType type : types) {
             List<FluidInteractionRecipe> spread = spreadProber.probe(type, sourceStates(type));
@@ -166,54 +174,74 @@ public final class InteractionProber {
         LOGGER.debug("Skipped the fluid spread of {} of {} fluid type(s) that inherit all of their spread code",
                 spreadProber.skippedTypes(), types.size());
 
-        List<FluidInteractionRecipe> registryRecipes = new ArrayList<>();
-        fromRegistry.values().forEach(registryRecipes::addAll);
-        Set<Object> known = new LinkedHashSet<>();
-        registryRecipes.forEach(recipe -> known.add(patternKey(recipe)));
-        Map<FluidType, List<FluidInteractionRecipe>> fromSpread = new LinkedHashMap<>();
-        int spreadCount = 0;
-        for (var entry : SpreadPreemption.apply(registryRecipes, probedSpread).entrySet()) {
-            List<FluidInteractionRecipe> spread = new ArrayList<>(entry.getValue());
-            spread.removeIf(recipe -> known.contains(patternKey(recipe)));
-            if (!spread.isEmpty()) {
-                fromSpread.put(entry.getKey(), spread);
-                spreadCount += spread.size();
+        long neighborStart = System.nanoTime();
+        NeighborProber neighborProber = new NeighborProber(level, settler, fluidCandidates);
+        Map<FluidType, List<FluidInteractionRecipe>> probedNeighbors = new LinkedHashMap<>();
+        for (FluidType type : types) {
+            List<FluidInteractionRecipe> found = neighborProber.probe(type, sourceStates(type));
+            if (!found.isEmpty()) {
+                probedNeighbors.put(type, found);
             }
         }
+        long neighborNanos = System.nanoTime() - neighborStart;
+        LOGGER.debug("Skipped the fluid neighbors of {} of {} fluid type(s) whose blocks inherit all of their update code",
+                neighborProber.skippedTypes(), types.size());
+
+        Set<Object> known = new LinkedHashSet<>();
+        fromRegistry.values().forEach(recipes -> recipes.forEach(recipe -> known.add(arrangementKey(recipe))));
+
+        Map<FluidType, List<FluidInteractionRecipe>> fromNeighbors = dedupe(probedNeighbors, known);
+        int neighborCount = 0;
+        for (List<FluidInteractionRecipe> found : fromNeighbors.values()) {
+            neighborCount += found.size();
+            found.forEach(recipe -> known.add(arrangementKey(recipe)));
+        }
+
+        Map<FluidType, List<FluidInteractionRecipe>> fromSpread = dedupe(probedSpread, known);
+        int spreadCount = fromSpread.values().stream().mapToInt(List::size).sum();
+
+        LOGGER.debug("Settled {} arrangement(s) in {} ms, reusing {} already settled; {} block scheduled tick(s) were "
+                        + "asked for, which only a server level can run",
+                settler.settledCount(), settler.millis(), settler.reusedCount(), level.blockTicksRequested());
 
         List<FluidInteractionRecipe> recipes = new ArrayList<>();
         for (FluidType type : types) {
-            recipes.addAll(byOwner(fromRegistry.getOrDefault(type, List.of()), fromSpread.getOrDefault(type, List.of())));
+            recipes.addAll(byOwner(fromRegistry.getOrDefault(type, List.of()), fromSpread.getOrDefault(type, List.of()),
+                    fromNeighbors.getOrDefault(type, List.of())));
         }
         List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
         LOGGER.info("Probed fluid spread of {} fluid type(s) into {} JEI recipe(s) in {} ms",
                 types.size(), spreadCount, spreadNanos / 1_000_000);
+        LOGGER.info("Probed fluid neighbors of {} fluid type(s) into {} JEI recipe(s) in {} ms",
+                types.size(), neighborCount, neighborNanos / 1_000_000);
         LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
-                interactionCount, merged.size(), (registryNanos + spreadNanos) / 1_000_000);
+                interactionCount, merged.size(), (registryNanos + spreadNanos + neighborNanos) / 1_000_000);
         return merged;
     }
 
     /**
-     * One fluid type's registry-derived and spread-discovered recipes as a single list: owner groups ranked by
-     * {@link #OWNER_ORDER}, and within one owner every registry recipe, in its own order, before every spread
-     * recipe, in its own order. Both inputs already carry their ids and are already grouped by owner in that
-     * ranking, so this regroups them without changing any recipe, id or numbering.
+     * One fluid type's recipes from all three tiers as a single list: owner groups ranked by {@link #OWNER_ORDER},
+     * and within one owner every registry recipe, then every spread recipe, then every neighbor recipe, each in
+     * its own order. All three inputs already carry their ids and are already grouped by owner in that ranking,
+     * so this regroups them without changing any recipe, id or numbering.
      */
-    private static List<FluidInteractionRecipe> byOwner(List<FluidInteractionRecipe> registry, List<FluidInteractionRecipe> spread) {
-        Map<String, List<FluidInteractionRecipe>> registryByOwner = new LinkedHashMap<>();
-        registry.forEach(recipe -> registryByOwner.computeIfAbsent(recipe.owner(), k -> new ArrayList<>()).add(recipe));
-        Map<String, List<FluidInteractionRecipe>> spreadByOwner = new LinkedHashMap<>();
-        spread.forEach(recipe -> spreadByOwner.computeIfAbsent(recipe.owner(), k -> new ArrayList<>()).add(recipe));
-
-        Set<String> owners = new LinkedHashSet<>(registryByOwner.keySet());
-        owners.addAll(spreadByOwner.keySet());
+    private static List<FluidInteractionRecipe> byOwner(List<FluidInteractionRecipe> registry,
+                                                        List<FluidInteractionRecipe> spread,
+                                                        List<FluidInteractionRecipe> neighbors) {
+        List<Map<String, List<FluidInteractionRecipe>>> tiers = new ArrayList<>();
+        Set<String> owners = new LinkedHashSet<>();
+        for (List<FluidInteractionRecipe> tier : List.of(registry, spread, neighbors)) {
+            Map<String, List<FluidInteractionRecipe>> byOwner = new LinkedHashMap<>();
+            tier.forEach(recipe -> byOwner.computeIfAbsent(recipe.owner(), k -> new ArrayList<>()).add(recipe));
+            tiers.add(byOwner);
+            owners.addAll(byOwner.keySet());
+        }
         List<String> ordered = new ArrayList<>(owners);
         ordered.sort(OWNER_ORDER);
 
-        List<FluidInteractionRecipe> result = new ArrayList<>(registry.size() + spread.size());
+        List<FluidInteractionRecipe> result = new ArrayList<>(registry.size() + spread.size() + neighbors.size());
         for (String owner : ordered) {
-            result.addAll(registryByOwner.getOrDefault(owner, List.of()));
-            result.addAll(spreadByOwner.getOrDefault(owner, List.of()));
+            tiers.forEach(tier -> result.addAll(tier.getOrDefault(owner, List.of())));
         }
         return result;
     }
@@ -231,10 +259,28 @@ public final class InteractionProber {
         return ordered;
     }
 
-    /** What a recipe shows, ignoring who owns it, so a spread probe cannot repeat a registry-derived recipe. */
-    private static Object patternKey(FluidInteractionRecipe recipe) {
+    /** The tier's recipes with everything an earlier tier already describes removed. */
+    private static Map<FluidType, List<FluidInteractionRecipe>> dedupe(
+            Map<FluidType, List<FluidInteractionRecipe>> tier, Set<Object> known) {
+        Map<FluidType, List<FluidInteractionRecipe>> kept = new LinkedHashMap<>();
+        for (var entry : tier.entrySet()) {
+            List<FluidInteractionRecipe> found = new ArrayList<>(entry.getValue());
+            found.removeIf(recipe -> known.contains(arrangementKey(recipe)));
+            if (!found.isEmpty()) {
+                kept.put(entry.getKey(), found);
+            }
+        }
+        return kept;
+    }
+
+    /**
+     * The physical arrangement a recipe describes: which fluid is placed last (the source), what stands where,
+     * and nothing about who found it. Results are a function of that arrangement now that every tier settles it,
+     * so two tiers proposing the same one reach the same answer and the first tier's attribution wins.
+     */
+    private static Object arrangementKey(FluidInteractionRecipe recipe) {
         return List.of(Set.copyOf(recipe.sources()), Set.copyOf(recipe.neighbors()), recipe.neighborOffset(),
-                recipe.conditions(), recipe.results());
+                recipe.conditions());
     }
 
     private ProbedInteraction probe(FluidType type, int index, InteractionInformation interaction) {
@@ -249,6 +295,8 @@ public final class InteractionProber {
 
         Map<GroupKey, Group> groups = new LinkedHashMap<>();
         boolean wroteFromPredicate = false;
+        int hitCount = 0;
+        int dropped = 0;
         for (FluidState source : sourceStates) {
             List<Hit> hits = new ArrayList<>();
             for (Placement candidate : fluidCandidates) {
@@ -260,6 +308,7 @@ public final class InteractionProber {
             if (hits.isEmpty()) {
                 search(interaction, source).ifPresent(hits::add);
             }
+            hitCount += hits.size();
             for (Hit hit : hits) {
                 wroteFromPredicate |= hit.wroteFromPredicate();
                 Map<BlockPos, Placement> conditions = new LinkedHashMap<>();
@@ -268,11 +317,33 @@ public final class InteractionProber {
                         conditions.put(pos.subtract(ORIGIN), placement);
                     }
                 });
-                Map<BlockPos, BlockState> results = new LinkedHashMap<>();
-                hit.writes().forEach((pos, state) -> results.put(pos.subtract(ORIGIN), state));
+                Placement neighbor = hit.requirements().get(NEIGHBOR);
+                Map<BlockPos, Placement> content = new LinkedHashMap<>();
+                content.put(BlockPos.ZERO, Placement.ofFluid(source));
+                if (neighbor != null) {
+                    content.put(FluidInteractionRecipe.NEIGHBOR_OFFSET, neighbor);
+                }
+                conditions.forEach(content::putIfAbsent);
+                Map<BlockPos, BlockState> wrote = new LinkedHashMap<>();
+                hit.writes().forEach((pos, state) -> wrote.put(pos.subtract(ORIGIN), state));
+                Settler.Outcome outcome = settler.settle(content, FluidInteractionRecipe.NEIGHBOR_OFFSET, wrote);
+                if (outcome.preempted() != null) {
+                    dropped++;
+                    LOGGER.debug("A level pre-empts fluid interaction {}#{} (from {}) with {}: {}",
+                            key, index, InteractionOwners.describe(owner),
+                            neighbor != null ? neighbor.describe().getString() : "no neighbor", outcome.preempted());
+                    continue;
+                }
+                Map<BlockPos, BlockState> results = outcome.results();
+                if (results.isEmpty()) {
+                    dropped++;
+                    LOGGER.debug("A level settles fluid interaction {}#{} (from {}) with {} without a result",
+                            key, index, InteractionOwners.describe(owner),
+                            neighbor != null ? neighbor.describe().getString() : "no neighbor");
+                    continue;
+                }
                 Group group = groups.computeIfAbsent(new GroupKey(conditions, results), k -> new Group());
                 group.sources.add(source);
-                Placement neighbor = hit.requirements().get(NEIGHBOR);
                 if (neighbor != null) {
                     group.neighbors.add(neighbor);
                 }
@@ -284,6 +355,10 @@ public final class InteractionProber {
         }
 
         if (groups.isEmpty()) {
+            if (hitCount > 0) {
+                LOGGER.info("A level settles every one of the {} arrangement(s) of fluid interaction {}#{} (from {}) "
+                        + "without a result", dropped, key, index, InteractionOwners.describe(owner));
+            }
             LOGGER.debug("No probe of fluid interaction {}#{} (from {}) succeeded", key, index, InteractionOwners.describe(owner));
             return new ProbedInteraction(index, owner,
                     List.of(FluidInteractionRecipe.failed(type, index, PENDING_ID, unable(type, owner), owner)));
@@ -356,8 +431,10 @@ public final class InteractionProber {
     }
 
     /**
-     * Places the arrangement, runs the predicate, and if it passes runs the action. Blocks written by the
-     * predicate count as results too: some interactions do all their work there and register an empty action.
+     * Places the arrangement, runs the predicate, and if it passes runs the action. An interaction that writes
+     * nothing at all never fired; blocks written by the predicate count, since some interactions do all their
+     * work there and register an empty action. What those writes were is not the answer, only the sign that this
+     * arrangement is one to settle and the measure the settled level is held against.
      */
     private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
         Run run = run(interaction, source, requirements);
@@ -504,6 +581,10 @@ public final class InteractionProber {
     private record Run(boolean passed, List<BlockPos> reads, Map<BlockPos, BlockState> writes) {
     }
 
+    /**
+     * One arrangement worth settling: what stands where, and what the interaction itself wrote there, which is
+     * what the settled level has to agree with for the outcome to be this interaction's.
+     */
     private record Hit(Map<BlockPos, Placement> requirements, Map<BlockPos, BlockState> writes, boolean wroteFromPredicate) {
     }
 

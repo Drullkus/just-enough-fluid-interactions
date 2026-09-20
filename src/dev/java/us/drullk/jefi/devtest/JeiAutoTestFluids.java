@@ -47,7 +47,7 @@ import net.neoforged.neoforge.registries.RegisterEvent;
  * {@code src/dev/resources/data/minecraft/tags/fluid/water.json}, which puts it among the fluids lava turns into
  * stone below itself. {@code JeiAutoTestInteractions} registers an interaction of its own with a lava neighbor,
  * which in a level fires on the block update that placing the lava sends, long before lava's spread tick; it is
- * the fixture for {@code SpreadPreemption}.
+ * the fixture proving that settling drops a spread alternative the registry reaches first.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestFluids {

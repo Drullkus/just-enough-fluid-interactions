@@ -21,7 +21,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * "Unable to process" fallback), one whose predicate inspects two positions (the multi-position search), one
  * whose predicate does the work itself and registers an empty action, a set that must collapse into a single
  * recipe through both of {@code RecipeMerger}'s passes, and one registered on a water-tagged fluid for a lava
- * neighbor, which is the arrangement {@code SpreadPreemption} takes back from vanilla's stone.
+ * neighbor, which a level runs before lava's spread tick, so settling leaves that fluid out of vanilla's stone
+ * recipe.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {

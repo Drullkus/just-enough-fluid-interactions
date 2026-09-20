@@ -136,6 +136,15 @@ neoForge {
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 
+        // Places every probed recipe alternative in the integrated server's own level, lets the level run its
+        // block updates and scheduled ticks, and reports where it and the probe disagree. See src/dev/java
+        // GroundAutoTest.
+        clientGroundTest {
+            client()
+            systemProperty 'justenoughfluidinteractions.groundtest', 'true'
+            programArguments.addAll '--width', '1280', '--height', '720'
+        }
+
         data {
             data()
             // example of overriding the workingDirectory set in configureEach above, uncomment if you want to use it

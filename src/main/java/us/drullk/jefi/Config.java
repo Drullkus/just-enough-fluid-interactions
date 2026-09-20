@@ -20,9 +20,9 @@ public final class Config {
             .comment("Fluid interaction recipes owned by these mod ids are hidden.")
             .defineListAllowEmpty("ignoredMods", List.of(), () -> "", Config::isPlausibleModId);
 
-    public static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_SPREAD_PROBE = BUILDER
-            .comment("Fluid ids to probe for spread rules although their classes declare no spread code of their own.")
-            .defineListAllowEmpty("forceSpreadProbe", List.of(), () -> "", Config::isPlausibleFluidId);
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_PROBE = BUILDER
+            .comment("Fluid ids to probe in every tier although their classes declare no code of their own.")
+            .defineListAllowEmpty("forceProbe", List.of(), () -> "", Config::isPlausibleFluidId);
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 

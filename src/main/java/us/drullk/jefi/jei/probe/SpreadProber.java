@@ -47,13 +47,20 @@ import net.neoforged.neoforge.fluids.FluidType;
  * {@code BaseFlowingFluid} is ticked: what those two classes do with a spreading fluid is place it, and placing
  * the fluid is never a result. Vanilla's fluids qualify by implementing {@code beforeDestroyingBlock} themselves,
  * as does every fluid built on {@code FlowingFluid} directly, and a mixin into one of those classes shows up as a
- * declaration too. A mixin into {@code FlowingFluid} itself does not, which is what {@code forceSpreadProbe} is
+ * declaration too. A mixin into {@code FlowingFluid} itself does not, which is what {@code forceProbe} is
  * for.
  *
  * <p>The source fluid sits at {@link InteractionProber#ORIGIN} and one candidate at a time sits at a target
  * position — directly below the source, or beside it at {@link FluidInteractionRecipe#NEIGHBOR_OFFSET}. Ticking
- * spreads the fluid, so most writes are the fluid arriving somewhere: a write only counts as a result when it
- * changes a position to a state that is neither air nor a state of the source fluid itself.
+ * spreads the fluid, so most writes are the fluid arriving somewhere: a write only counts as worth looking at
+ * when it changes a position to a state that is neither air nor a state of the source fluid itself.
+ *
+ * <p>That single tick is a filter, not an answer. An arrangement it picks out is handed to {@link Settler},
+ * which builds it with a level's own semantics and lets every channel run; what the level settles on is the
+ * recipe's result, and an arrangement that settles without one is not a recipe at all. The tick is also the
+ * measure the answer is held against: a recipe here describes what the spread rule does, so an arrangement whose
+ * settled level holds anything but what that tick wrote was pre-empted by another channel and belongs to the
+ * rule that channel runs.
  */
 public final class SpreadProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -89,6 +96,7 @@ public final class SpreadProber {
     private static final String NEOFORGE_BASE_FLUID = "net.neoforged.neoforge.fluids.BaseFlowingFluid";
 
     private final SandboxLevel level;
+    private final Settler settler;
     private final List<Placement> fluidCandidates;
     /** Every fluid, plus the blocks vanilla's spread gate lets a fluid enter. */
     private final List<Placement> reachableCandidates;
@@ -98,14 +106,16 @@ public final class SpreadProber {
     private final Map<Class<?>, Set<String>> declaredMethods = new HashMap<>();
     private int runs;
     private int skippedTypes;
+    private int dropped;
 
-    public SpreadProber(SandboxLevel level, List<Placement> fluidCandidates, List<Placement> blockCandidates) {
+    public SpreadProber(SandboxLevel level, Settler settler, List<Placement> fluidCandidates, List<Placement> blockCandidates) {
         this.level = level;
+        this.settler = settler;
         this.fluidCandidates = List.copyOf(fluidCandidates);
         List<Placement> reachableBlocks = blockCandidates.stream().filter(SpreadProber::canHoldFluid).toList();
         this.reachableCandidates = concat(fluidCandidates, reachableBlocks);
         this.allCandidates = concat(fluidCandidates, blockCandidates);
-        this.forced = Set.copyOf(Config.FORCE_SPREAD_PROBE.get());
+        this.forced = Set.copyOf(Config.FORCE_PROBE.get());
         LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
                 fluidCandidates.size(), reachableBlocks.size(), blockCandidates.size());
     }
@@ -146,6 +156,7 @@ public final class SpreadProber {
         Set<Fluid> unrestricted = unrestricted(probed);
         long start = System.nanoTime();
         int before = runs;
+        int lost = dropped;
 
         Map<Outcome, Group> outcomes = new LinkedHashMap<>();
         for (BlockPos target : TARGET_OFFSETS) {
@@ -153,7 +164,7 @@ public final class SpreadProber {
                 Fluid still = FluidInteractionRecipe.stillForm(source);
                 String owner = InteractionOwners.ofFluid(still);
                 for (Placement candidate : unrestricted.contains(still) ? allCandidates : reachableCandidates) {
-                    Map<BlockPos, BlockState> results = run(source, target, candidate);
+                    Map<BlockPos, BlockState> results = settled(source, target, candidate);
                     if (results.isEmpty()) {
                         continue;
                     }
@@ -166,6 +177,10 @@ public final class SpreadProber {
         outcomes.forEach((outcome, group) -> group.inert = inert(probed, outcome.target(), group));
         LOGGER.debug("Probed fluid spread of {} in {} ms over {} candidate run(s) of {} source state(s)",
                 InteractionProber.keyOf(type), (System.nanoTime() - start) / 1_000_000, runs - before, probed.size());
+        if (outcomes.isEmpty() && dropped > lost) {
+            LOGGER.info("A level settles every one of the {} arrangement(s) the fluid spread of {} writes in without "
+                    + "a result", dropped - lost, InteractionProber.keyOf(type));
+        }
         return order(type, outcomes);
     }
 
@@ -242,7 +257,7 @@ public final class SpreadProber {
             if (group.sources.contains(candidate) || !sharesFluid(candidate, group.sources)) {
                 continue;
             }
-            if (group.neighbors.stream().allMatch(neighbor -> run(candidate, target, neighbor).isEmpty())) {
+            if (group.neighbors.stream().allMatch(neighbor -> settled(candidate, target, neighbor).isEmpty())) {
                 inertSources.add(candidate);
             }
         }
@@ -252,7 +267,7 @@ public final class SpreadProber {
             if (other == null || group.neighbors.contains(other)) {
                 continue;
             }
-            if (group.sources.stream().allMatch(source -> run(source, target, other).isEmpty())) {
+            if (group.sources.stream().allMatch(source -> settled(source, target, other).isEmpty())) {
                 inertNeighbors.add(other);
             }
         }
@@ -278,6 +293,34 @@ public final class SpreadProber {
             }
         }
         return null;
+    }
+
+    /**
+     * What a level leaves behind at one arrangement the spread of this fluid writes into. The single tick of
+     * {@link #run} decides whether the arrangement is worth building at all and what the spread rule wrote there;
+     * the answer always comes from {@link Settler}, so an alternative's outcome and whether a form is inert are
+     * decided the same way. Nothing is left of an arrangement whose settled level holds something other than what
+     * the spread rule wrote: that outcome is another rule's, and so is the recipe describing it.
+     */
+    private Map<BlockPos, BlockState> settled(FluidState source, BlockPos target, Placement candidate) {
+        Map<BlockPos, BlockState> wrote = run(source, target, candidate);
+        if (wrote.isEmpty()) {
+            return Map.of();
+        }
+        Settler.Outcome outcome = settler.settle(Settler.arrangement(source, target, candidate), target, wrote);
+        if (outcome.preempted() != null) {
+            dropped++;
+            LOGGER.debug("A level pre-empts the fluid spread of {} onto {} at {}: {}",
+                    source.getFluidType().getDescriptionId(), candidate.describe().getString(), target.toShortString(),
+                    outcome.preempted());
+            return Map.of();
+        }
+        if (outcome.results().isEmpty()) {
+            dropped++;
+            LOGGER.debug("A level settles the fluid spread of {} onto {} at {} without a result",
+                    source.getFluidType().getDescriptionId(), candidate.describe().getString(), target.toShortString());
+        }
+        return outcome.results();
     }
 
     /**

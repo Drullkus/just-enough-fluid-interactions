@@ -24,9 +24,10 @@ import net.minecraft.world.level.levelgen.presets.WorldPresets;
 
 /** The flat creative world and the screenshots that every recipe viewer smoke test needs. */
 final class AutoTestWorld {
-    /** The dev-only interactions and fluid are registered for whichever viewer's smoke test is running. */
+    /** The dev-only interactions and fluids are registered for whichever development run is going. */
     static final boolean FIXTURES = Boolean.getBoolean("justenoughfluidinteractions.jeiautotest")
-            || Boolean.getBoolean("justenoughfluidinteractions.emiautotest");
+            || Boolean.getBoolean("justenoughfluidinteractions.emiautotest")
+            || Boolean.getBoolean("justenoughfluidinteractions.groundtest");
 
     private AutoTestWorld() {
     }

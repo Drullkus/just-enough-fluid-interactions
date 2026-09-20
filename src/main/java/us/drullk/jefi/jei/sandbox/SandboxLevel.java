@@ -1,16 +1,20 @@
 package us.drullk.jefi.jei.sandbox;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
 
-import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.Placement;
+import com.mojang.logging.LogUtils;
 
 import dev.compactmods.gander.level.VirtualLevel;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -25,7 +29,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.redstone.CollectingNeighborUpdater;
+import net.minecraft.world.level.redstone.NeighborUpdater;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.ticks.LevelTickAccess;
+import net.minecraft.world.ticks.ScheduledTick;
 import net.minecraft.world.ticks.TickPriority;
 import net.neoforged.neoforge.client.model.data.ModelData;
 import net.neoforged.neoforge.client.model.data.ModelDataManager;
@@ -34,26 +42,42 @@ import net.neoforged.neoforge.client.model.data.ModelDataManager;
  * A throwaway {@link net.minecraft.world.level.Level} used to execute fluid interactions outside any real world.
  *
  * <p>Built on Gander's {@link VirtualLevel} for all the boilerplate (chunk source, light engine, biome, no-op
- * sounds and events), but with its own block and fluid storage so that:
- * <ul>
- *     <li>placing a block never fires {@code onPlace}, which would otherwise run the real fluid interaction
- *     before it can be observed;</li>
- *     <li>a fluid state can be present without a block, so bucket-only fluids can still be probed;</li>
- *     <li>every read and write can be recorded while an interaction predicate or action runs.</li>
- * </ul>
+ * sounds and events), but with its own block and fluid storage so that a fluid state can be present without a
+ * block, so bucket-only fluids can still be probed, and so every read and write can be recorded.
  *
- * <p>Neighbor updates are swallowed so an interaction cannot recursively trigger further interactions.
- * The level reports itself as server-side so interactions that guard on {@code !level.isClientSide} run.
+ * <p>The level has two modes. While it is quiet a write only lands in storage: no {@code onRemove}, no
+ * {@code onPlace}, no neighbor notification, no shape update. That is what a probe tier needs while it calls one
+ * hook of one rule by hand and asks what that hook alone wrote. While it is live ({@link #setLive(boolean)}) a
+ * write goes through the steps a server level takes — the old state's {@code onRemove}, the new state's
+ * {@code onPlace}, neighbor notification in vanilla's order through a {@link CollectingNeighborUpdater}, and the
+ * shape updates — and scheduled fluid ticks land in a queue that {@link #settle(int, int)} drains against a
+ * virtual game time.
+ *
+ * <p>The level reports itself as server-side so interactions that guard on {@code !level.isClientSide} run.
+ * Block scheduled ticks need a {@code ServerLevel} and are only counted; entities are denied; nothing is randomly
+ * ticked; and neighbor notification skips NeoForge's {@code NeighborNotifyEvent}, so no event of a mod's fires
+ * while recipes are being probed.
  */
 public final class SandboxLevel extends VirtualLevel {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     /** Everything happens inside one chunk so Gander's bakery only visits a single chunk column. */
     public static final AABB DEFAULT_BOUNDS = new AABB(0, 0, 0, 16, 16, 16);
+
+    /** What a server level allows; Gander builds its own updater with a limit of zero, which skips every update. */
+    private static final int MAX_CHAINED_NEIGHBOR_UPDATES = 1_000_000;
 
     private final Long2ObjectMap<BlockState> blocks = new Long2ObjectOpenHashMap<>();
     private final Long2ObjectMap<FluidState> fluids = new Long2ObjectOpenHashMap<>();
     private final Set<BlockPos> reads = new LinkedHashSet<>();
     private final Map<BlockPos, BlockState> writes = new LinkedHashMap<>();
+    private final NeighborUpdater updater = new CollectingNeighborUpdater(this, MAX_CHAINED_NEIGHBOR_UPDATES);
+    private final SandboxTicks<Fluid> fluidTicks = new SandboxTicks<>();
+    private final SandboxTicks<Block> blockTicks = new SandboxTicks<>();
     private boolean tracking;
+    private boolean live;
+    private long gameTime;
+    private int blockTicksRequested;
 
     public SandboxLevel(RegistryAccess access) {
         super(access, false);
@@ -62,13 +86,17 @@ public final class SandboxLevel extends VirtualLevel {
 
     // ---- scene authoring -------------------------------------------------------------------------------------
 
-    /** Removes every block, fluid and recording. */
+    /** Removes every block, fluid, scheduled tick and recording, and returns the level to its quiet mode. */
     public void reset() {
         blocks.clear();
         fluids.clear();
         reads.clear();
         writes.clear();
+        fluidTicks.clear();
+        blockTicks.clear();
         tracking = false;
+        live = false;
+        gameTime = 0;
     }
 
     public void place(BlockPos pos, Placement placement) {
@@ -95,6 +123,77 @@ public final class SandboxLevel extends VirtualLevel {
         if (!state.isEmpty()) {
             fluids.put(pos.asLong(), state);
         }
+    }
+
+    /**
+     * Places one part of a settling arrangement the way a level does, through a real {@code setBlock} with every
+     * update flag set. A fluid no block can hold is stored directly instead: no level can be put into that state,
+     * so there is no placement for a level to run.
+     */
+    public void placeLive(BlockPos pos, Placement placement) {
+        FluidState fluid = placement.fluid();
+        if (fluid != null && placement.block().isAir()) {
+            placeFluid(pos, fluid);
+            return;
+        }
+        setBlock(pos, placement.block(), Block.UPDATE_ALL);
+    }
+
+    /** Every block the level currently holds; air is absent rather than stored. */
+    public Map<BlockPos, BlockState> contents() {
+        Map<BlockPos, BlockState> result = new LinkedHashMap<>(blocks.size());
+        blocks.long2ObjectEntrySet().forEach(entry -> result.put(BlockPos.of(entry.getLongKey()), entry.getValue()));
+        return result;
+    }
+
+    // ---- modes and ticking ----------------------------------------------------------------------------------
+
+    /** Whether a write runs the level's own channels. Off while a tier calls one rule's hook by hand. */
+    public void setLive(boolean live) {
+        this.live = live;
+    }
+
+    /**
+     * Runs the scheduled fluid ticks the way a server level does: each round advances the virtual game time to
+     * the next due tick, collects everything due at that time in {@link ScheduledTick#DRAIN_ORDER} and runs the
+     * collected batch, so a tick scheduled while the batch runs waits for a later round exactly as it does in a
+     * level. Stops when nothing is due within {@code maxGameTicks} of where the settle started, or when
+     * {@code maxRuns} ticks have run.
+     *
+     * @return how many fluid ticks ran
+     */
+    public int settle(int maxGameTicks, int maxRuns) {
+        long deadline = gameTime + maxGameTicks;
+        int runs = 0;
+        while (runs < maxRuns) {
+            long next = fluidTicks.nextTrigger();
+            if (next > deadline) {
+                break;
+            }
+            gameTime = Math.max(gameTime + 1, next);
+            for (ScheduledTick<Fluid> tick : fluidTicks.drain(gameTime)) {
+                if (runs >= maxRuns) {
+                    break;
+                }
+                runs++;
+                FluidState state = getFluidState(tick.pos());
+                if (!state.is(tick.type())) {
+                    continue;
+                }
+                try {
+                    state.tick(this, tick.pos());
+                } catch (RuntimeException | LinkageError e) {
+                    LOGGER.debug("Ticking {} at {} threw while settling an arrangement",
+                            state.getFluidType().getDescriptionId(), tick.pos().toShortString(), e);
+                }
+            }
+        }
+        return runs;
+    }
+
+    /** How many block scheduled ticks were asked for, in total; none of them can run without a server level. */
+    public int blockTicksRequested() {
+        return blockTicksRequested;
     }
 
     // ---- tracking -------------------------------------------------------------------------------------------
@@ -146,14 +245,59 @@ public final class SandboxLevel extends VirtualLevel {
         return fluid != null ? fluid : blockAt(pos).getFluidState();
     }
 
+    /**
+     * Mirrors {@code Level.setBlock} together with the part of {@code LevelChunk.setBlockState} a level without
+     * block entities has: writing an identical state changes nothing, the old state is told it was removed, an
+     * {@code onRemove} that put a different block there abandons the write, and the new state is told it was
+     * placed before the neighbours hear anything. While the level is quiet none of that runs and the write is
+     * only recorded.
+     */
     @Override
     public boolean setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft) {
-        BlockPos key = pos.immutable();
-        placeBlock(key, state);
-        if (tracking) {
-            writes.put(key, state);
+        if (isOutsideBuildHeight(pos)) {
+            return false;
         }
+        BlockPos at = pos.immutable();
+        if (!live) {
+            store(at, state);
+            return true;
+        }
+        BlockState old = blockAt(at);
+        if (old == state) {
+            return false;
+        }
+        store(at, state);
+        boolean moving = (flags & Block.UPDATE_MOVE_BY_PISTON) != 0;
+        old.onRemove(this, at, state, moving);
+        if (!blockAt(at).is(state.getBlock())) {
+            return false;
+        }
+        state.onPlace(this, at, old, moving);
+        markAndNotify(at, old, state, flags, recursionLeft);
         return true;
+    }
+
+    private void store(BlockPos pos, BlockState state) {
+        placeBlock(pos, state);
+        if (tracking) {
+            writes.put(pos, state);
+        }
+    }
+
+    /** {@code Level.markAndNotifyBlock} without the parts only a client or a chunk cares about. */
+    private void markAndNotify(BlockPos pos, BlockState old, BlockState state, int flags, int recursionLeft) {
+        if (blockAt(pos) != state) {
+            return;
+        }
+        if ((flags & Block.UPDATE_NEIGHBORS) != 0) {
+            blockUpdated(pos, old.getBlock());
+        }
+        if ((flags & Block.UPDATE_KNOWN_SHAPE) == 0 && recursionLeft > 0) {
+            int shapeFlags = flags & ~(Block.UPDATE_NEIGHBORS | Block.UPDATE_SUPPRESS_DROPS);
+            old.updateIndirectNeighbourShapes(this, pos, shapeFlags, recursionLeft - 1);
+            state.updateNeighbourShapes(this, pos, shapeFlags, recursionLeft - 1);
+            state.updateIndirectNeighbourShapes(this, pos, shapeFlags, recursionLeft - 1);
+        }
     }
 
     @Override
@@ -166,41 +310,51 @@ public final class SandboxLevel extends VirtualLevel {
         return setBlock(pos, state, Block.UPDATE_ALL);
     }
 
+    @Override
+    public long getGameTime() {
+        return gameTime;
+    }
+
+    @Override
+    public LevelTickAccess<Block> getBlockTicks() {
+        return blockTicks;
+    }
+
+    @Override
+    public LevelTickAccess<Fluid> getFluidTicks() {
+        return fluidTicks;
+    }
+
     /**
-     * Nothing here is ever ticked a second time, and a fluid ticked by the spread probe schedules its own next
-     * tick, so scheduling has to end at the sandbox rather than reach Gander's tick lists.
+     * The scheduling {@code LevelAccessor} would do, but against this level's own virtual game time rather than
+     * the shared, never-advancing level data Gander hands every virtual level.
      */
     @Override
-    public void scheduleTick(BlockPos pos, Block block, int delay) {
-    }
-
-    @Override
     public void scheduleTick(BlockPos pos, Block block, int delay, TickPriority priority) {
+        blockTicksRequested++;
+        blockTicks.schedule(new ScheduledTick<>(block, pos, gameTime + delay, priority, nextSubTickCount()));
     }
 
     @Override
-    public void scheduleTick(BlockPos pos, Fluid fluid, int delay) {
+    public void scheduleTick(BlockPos pos, Block block, int delay) {
+        scheduleTick(pos, block, delay, TickPriority.NORMAL);
     }
 
     @Override
     public void scheduleTick(BlockPos pos, Fluid fluid, int delay, TickPriority priority) {
+        fluidTicks.schedule(new ScheduledTick<>(fluid, pos, gameTime + delay, priority, nextSubTickCount()));
+    }
+
+    @Override
+    public void scheduleTick(BlockPos pos, Fluid fluid, int delay) {
+        scheduleTick(pos, fluid, delay, TickPriority.NORMAL);
     }
 
     /** There is no entity system here, so drops from a block a fluid destroys go nowhere. */
     @Override
     public boolean addFreshEntity(Entity entity) {
-        JustEnoughFluidInteractions.LOGGER.debug("Denied attempted entity spawn {}", entity.getType());
+        LOGGER.debug("Denied attempted entity spawn {}", entity.getType());
         return false;
-    }
-
-    @Override
-    public boolean removeBlock(BlockPos pos, boolean isMoving) {
-        return setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-    }
-
-    @Override
-    public boolean destroyBlock(BlockPos pos, boolean dropBlock, @Nullable Entity entity, int recursionLeft) {
-        return removeBlock(pos, false);
     }
 
     @Override
@@ -252,21 +406,96 @@ public final class SandboxLevel extends VirtualLevel {
 
     @Override
     public void updateNeighborsAt(BlockPos pos, Block block) {
+        if (live) {
+            updater.updateNeighborsAtExceptFromFacing(pos, block, null);
+        }
+    }
+
+    @Override
+    public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block block, Direction skipSide) {
+        if (live) {
+            updater.updateNeighborsAtExceptFromFacing(pos, block, skipSide);
+        }
     }
 
     @Override
     public void neighborChanged(BlockPos pos, Block block, BlockPos fromPos) {
+        if (live) {
+            updater.neighborChanged(pos, block, fromPos);
+        }
     }
 
     @Override
     public void neighborChanged(BlockState state, BlockPos pos, Block block, BlockPos fromPos, boolean isMoving) {
+        if (live) {
+            updater.neighborChanged(state, pos, block, fromPos, isMoving);
+        }
     }
 
     @Override
     public void neighborShapeChanged(Direction direction, BlockState queried, BlockPos pos, BlockPos offsetPos, int flags, int recursionLevel) {
+        if (live) {
+            updater.shapeUpdate(direction, queried, pos, offsetPos, flags, recursionLevel);
+        }
     }
 
     @Override
     public void blockUpdated(BlockPos pos, Block block) {
+        updateNeighborsAt(pos, block);
+    }
+
+    /**
+     * One kind's scheduled ticks, ordered and deduplicated the way a level's chunk tick containers are: one
+     * pending tick per position and type, drained by trigger time, then priority, then scheduling order.
+     */
+    private static final class SandboxTicks<T> implements LevelTickAccess<T> {
+        private final PriorityQueue<ScheduledTick<T>> queue = new PriorityQueue<>(ScheduledTick.DRAIN_ORDER);
+        private final Map<Slot, ScheduledTick<T>> pending = new HashMap<>();
+
+        @Override
+        public void schedule(ScheduledTick<T> tick) {
+            if (pending.putIfAbsent(new Slot(tick.pos(), tick.type()), tick) == null) {
+                queue.add(tick);
+            }
+        }
+
+        @Override
+        public boolean hasScheduledTick(BlockPos pos, T type) {
+            return pending.containsKey(new Slot(pos, type));
+        }
+
+        @Override
+        public boolean willTickThisTick(BlockPos pos, T type) {
+            ScheduledTick<T> tick = pending.get(new Slot(pos, type));
+            return tick != null && tick.triggerTick() <= nextTrigger();
+        }
+
+        @Override
+        public int count() {
+            return queue.size();
+        }
+
+        long nextTrigger() {
+            ScheduledTick<T> next = queue.peek();
+            return next != null ? next.triggerTick() : Long.MAX_VALUE;
+        }
+
+        List<ScheduledTick<T>> drain(long time) {
+            List<ScheduledTick<T>> due = new ArrayList<>();
+            while (!queue.isEmpty() && queue.peek().triggerTick() <= time) {
+                ScheduledTick<T> tick = queue.poll();
+                pending.remove(new Slot(tick.pos(), tick.type()));
+                due.add(tick);
+            }
+            return due;
+        }
+
+        void clear() {
+            queue.clear();
+            pending.clear();
+        }
+
+        private record Slot(BlockPos pos, Object type) {
+        }
     }
 }

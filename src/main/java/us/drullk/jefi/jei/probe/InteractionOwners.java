@@ -91,6 +91,22 @@ public final class InteractionOwners {
         return byClass != null ? byClass : namespace;
     }
 
+    /**
+     * The mod credited with a block's own behaviour, for rules that live in a liquid block's update hooks: the
+     * class evidence a lambda would give, then the block's registry namespace.
+     */
+    public static @Nullable String ofBlock(Block block) {
+        String byClass = modOf(block.getClass());
+        if (byClass != null && isThirdParty(byClass)) {
+            return byClass;
+        }
+        String namespace = namespaceOfKey(BuiltInRegistries.BLOCK.getKey(block));
+        if (namespace != null && isThirdParty(namespace)) {
+            return namespace;
+        }
+        return byClass != null ? byClass : namespace;
+    }
+
     public static String describe(@Nullable String owner) {
         return owner != null ? owner : "unknown";
     }
