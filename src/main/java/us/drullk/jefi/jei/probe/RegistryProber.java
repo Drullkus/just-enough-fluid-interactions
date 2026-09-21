@@ -359,9 +359,9 @@ final class RegistryProber {
                 return new ProbedInteraction(index, owner, recipes());
             }
             if (first != null) {
-                LOGGER.info("A level pre-empts {} of the {} arrangement(s) of fluid interaction {}: {}", preempted, dropped, this, first);
+                LOGGER.debug("A level pre-empts {} of the {} arrangement(s) of fluid interaction {}: {}", preempted, dropped, this, first);
             } else if (hits > 0) {
-                LOGGER.info("A level settles every one of the {} arrangement(s) of fluid interaction {} without a result", dropped, this);
+                LOGGER.debug("A level settles every one of the {} arrangement(s) of fluid interaction {} without a result", dropped, this);
             }
             LOGGER.debug("No probe of fluid interaction {} succeeded", this);
             return failed(first != null

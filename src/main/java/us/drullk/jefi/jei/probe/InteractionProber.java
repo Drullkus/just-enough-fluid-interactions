@@ -147,7 +147,7 @@ public final class InteractionProber {
             skippedInteractions += interactions;
             LOGGER.debug("Skipped {} fluid interaction(s) on {}, no fluid of which has a block", interactions, RecipeIds.keyOf(type));
         }
-        LOGGER.info("Skipped {} fluid interaction(s) on {} fluid type(s) whose fluids have no block",
+        LOGGER.debug("Skipped {} fluid interaction(s) on {} fluid type(s) whose fluids have no block",
                 skippedInteractions, skippedTypes);
         return probable;
     }

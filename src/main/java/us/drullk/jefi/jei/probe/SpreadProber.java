@@ -224,7 +224,7 @@ public final class SpreadProber extends RuleProber {
     private static void logFormDifference(FluidInteractionRecipe recipe) {
         BlockState result = recipe.results().get(recipe.neighborOffset());
         for (FluidState inert : recipe.inert().sources()) {
-            LOGGER.info("Fluid spread form difference: {} changes {} {} into {} as {}; its {} form spreads over them without changing them",
+            LOGGER.debug("Fluid spread form difference: {} changes {} {} into {} as {}; its {} form spreads over them without changing them",
                     BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(inert)),
                     recipe.neighbors().stream().map(SpreadProber::key).toList(),
                     recipe.neighborOffset().equals(BELOW_OFFSET) ? "below it" : "beside it",
