@@ -314,8 +314,15 @@ public abstract class RuleProber {
      * Places one arrangement and calls the hook, unless an earlier run at the target already answers for this
      * candidate ({@link RunMemo}). Returns the writes that change a position, keyed by offset from the source.
      * A write of air, of what the tier placed, or of an own fluid's state is not a change.
+     *
+     * <p>A source form whose own classes declare no hook is probed because its other form does. Its code is all
+     * inherited, and inherited code writes only the fluid's own states. So that form changes nothing at any
+     * arrangement, and it is inert without a run.
      */
     private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
+        if (!forced(FluidInteractionRecipe.stillForm(source)) && !declaresHook(source)) {
+            return Map.of();
+        }
         Map<BlockPos, Placement> scene = scene(source, target, candidate);
         RunMemo<Map<BlockPos, BlockState>> memo = readsTargetThroughLevel(source)
                 ? memos.computeIfAbsent(new Target(source, target), key -> new RunMemo<>()) : null;
