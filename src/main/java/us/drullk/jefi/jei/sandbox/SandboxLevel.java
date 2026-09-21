@@ -1,5 +1,7 @@
 package us.drullk.jefi.jei.sandbox;
 
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -71,6 +73,9 @@ public final class SandboxLevel extends VirtualLevel {
     /** What a server level allows. Gander builds its own updater with a limit of zero. That limit skips every update. */
     private static final int MAX_CHAINED_NEIGHBOR_UPDATES = 1_000_000;
 
+    /** Seed for keeping level simulations deterministic */
+    private static final long SEED = new BigInteger("JEFI".getBytes(StandardCharsets.US_ASCII)).longValue();
+
     /**
      * The number of writes a quiet hook run stays under. A run that writes more than this, such as a settle
      * that lets a fluid pour, has grown the tables past their default capacity.
@@ -94,6 +99,7 @@ public final class SandboxLevel extends VirtualLevel {
     public SandboxLevel(RegistryAccess access) {
         super(access, false);
         setBounds(DEFAULT_BOUNDS);
+        random.setSeed(SEED);
     }
 
     // ---- scene authoring -------------------------------------------------------------------------------------
@@ -120,6 +126,7 @@ public final class SandboxLevel extends VirtualLevel {
         trackingReads = false;
         live = false;
         gameTime = 0;
+        random.setSeed(SEED);
     }
 
     public void place(BlockPos pos, Placement placement) {
