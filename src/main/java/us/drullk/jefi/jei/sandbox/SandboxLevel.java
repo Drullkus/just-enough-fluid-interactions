@@ -118,6 +118,7 @@ public final class SandboxLevel extends VirtualLevel {
      * grew the tables, this method trims them back, and the clear of every later small run stays small.
      */
     public void reset() {
+        setBounds(DEFAULT_BOUNDS);
         boolean grown = writesSinceReset > SMALL_RUN;
         blocks.clear();
         fluids.clear();
@@ -137,6 +138,17 @@ public final class SandboxLevel extends VirtualLevel {
         live = false;
         gameTime = 0;
         random.setSeed(SEED);
+    }
+
+    /**
+     * Puts the level's floor at {@code y}. A write below the floor fails, as a write below a level's build
+     * height does. A fluid that falls off an arrangement then stops on the floor: vanilla never spreads a fluid
+     * sideways while it can fall, and a write below the floor is not a fall it can see. Nothing on or below the
+     * floor reaches the arrangement, because only air stands between. {@link #reset} restores the default
+     * bounds.
+     */
+    public void floor(int y) {
+        setBounds(new AABB(DEFAULT_BOUNDS.minX, y, DEFAULT_BOUNDS.minZ, DEFAULT_BOUNDS.maxX, DEFAULT_BOUNDS.maxY, DEFAULT_BOUNDS.maxZ));
     }
 
     public void place(BlockPos pos, Placement placement) {

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Stream;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -87,7 +88,7 @@ public final class Settler {
      */
     public Outcome settle(Map<BlockPos, Placement> content, BlockPos neighborOffset, Map<BlockPos, BlockState> wrote) {
         long start = System.nanoTime();
-        Rest rest = run(content, neighborOffset);
+        Rest rest = run(content, neighborOffset, wrote.keySet());
         nanos += System.nanoTime() - start;
         settled++;
         if (!rest.completed()) {
@@ -131,12 +132,19 @@ public final class Settler {
         return nanos / 1_000_000;
     }
 
-    /** Builds the arrangement in the live sandbox and runs its fluid ticks. The level then holds the answer. */
-    private Rest run(Map<BlockPos, Placement> content, BlockPos neighborOffset) {
+    /**
+     * Builds the arrangement in the live sandbox and runs its fluid ticks. The level then holds the answer.
+     * The level's floor sits at the lowest position the arrangement holds or the rule wrote. A fluid that
+     * pours off the arrangement stops on that floor instead of flooding the level below, which the answer
+     * never reads and which cannot reach the arrangement back.
+     */
+    private Rest run(Map<BlockPos, Placement> content, BlockPos neighborOffset, Set<BlockPos> wrote) {
         Map<BlockPos, Placement> fixtures = Fixtures.around(content, neighborOffset);
         Map<BlockPos, Placement> placed = new LinkedHashMap<>(fixtures);
         placed.putAll(content);
+        int lowest = Stream.concat(placed.keySet().stream(), wrote.stream()).mapToInt(BlockPos::getY).min().orElse(0);
         level.reset();
+        level.floor(SandboxLevel.ORIGIN.getY() + lowest);
         level.setLive(true);
         try {
             fixtures.forEach((offset, placement) -> level.placeLive(SandboxLevel.ORIGIN.offset(offset), placement));
