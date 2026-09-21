@@ -15,7 +15,7 @@ public final class Config {
     public static final ModConfigSpec.BooleanValue HIDE_UNPROCESSABLE = BUILDER
             .comment("Hide recipes of interactions that the probe cannot run, and of interactions that do not occur",
                     "in the world because a different rule occurs first.")
-            .define("hideUnprocessable", false);
+            .define("hideUnprocessable", true);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> IGNORED_MODS = BUILDER
             .comment("Fluid interaction recipes owned by these mod ids are hidden.")
