@@ -109,6 +109,15 @@ public abstract class RuleProber {
     /** The offset whose result block orders the outcomes of one target. */
     abstract BlockPos primaryResultOffset(BlockPos target);
 
+    /**
+     * Whether the hook learns the candidate only through reads of the level. Then an earlier run at the target
+     * can answer for a later candidate ({@link RunMemo}). A hook that receives the candidate as an argument
+     * needs a run of its own for every candidate.
+     */
+    boolean readsTargetThroughLevel(FluidState source) {
+        return true;
+    }
+
     /** Runs for every recipe the tier produces. */
     void onRecipe(FluidInteractionRecipe recipe) {
     }
@@ -308,8 +317,9 @@ public abstract class RuleProber {
      */
     private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
         Map<BlockPos, Placement> scene = scene(source, target, candidate);
-        RunMemo<Map<BlockPos, BlockState>> memo = memos.computeIfAbsent(new Target(source, target), key -> new RunMemo<>());
-        Map<BlockPos, BlockState> writes = memo.lookup(candidate);
+        RunMemo<Map<BlockPos, BlockState>> memo = readsTargetThroughLevel(source)
+                ? memos.computeIfAbsent(new Target(source, target), key -> new RunMemo<>()) : null;
+        Map<BlockPos, BlockState> writes = memo != null ? memo.lookup(candidate) : null;
         if (writes != null) {
             skippedRuns++;
         } else {
@@ -317,7 +327,9 @@ public abstract class RuleProber {
             if (writes == null) {
                 return Map.of();
             }
-            memo.record(candidate, level.watchedReads(), writes);
+            if (memo != null) {
+                memo.record(candidate, level.watchedReads(), writes);
+            }
         }
         Set<Fluid> own = ownFluids(source, candidate);
         Map<BlockPos, BlockState> results = new LinkedHashMap<>();

@@ -1,8 +1,13 @@
 package us.drullk.jefi.jei.probe;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
@@ -13,10 +18,12 @@ import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.LiquidBlockContainer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.FlowingFluid;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
 
 /**
@@ -39,6 +46,11 @@ import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
  * <p>Vanilla's gate lets a fluid enter only a block that holds fluid or that does not block motion. A fluid that
  * declares none of {@code tick}, {@code spread} and {@code canSpreadTo} keeps that gate. The tier offers such a
  * fluid only those blocks. The tier offers every fluid candidate to every fluid.
+ *
+ * <p>A fluid whose own spread code is {@code beforeDestroyingBlock} alone spreads exactly as vanilla does, except
+ * inside that hook. Vanilla calls the hook with the block it is about to replace, right before it writes its own
+ * fluid there. So the tier calls the hook by hand with each candidate, instead of a whole tick. The hook runs for
+ * every candidate vanilla can enter, some of which the tick never reaches. The settle step drops those.
  */
 public final class SpreadProber extends RuleProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -52,6 +64,11 @@ public final class SpreadProber extends RuleProber {
     /** The subset of {@link #SPREAD_METHODS} that decides where a fluid can go at all. */
     private static final Set<String> REACH_METHODS = Set.of("tick", "spread", "canSpreadTo");
 
+    /** The hook vanilla calls before it replaces a block with its fluid. Abstract in {@code FlowingFluid}. */
+    private static final Set<String> DESTROY_HOOK = Set.of("beforeDestroyingBlock");
+
+    private static final @Nullable MethodHandle DESTROY_HOOK_HANDLE = findDestroyHook();
+
     /** Where the class walk stops: these classes declare the spread behavior a fluid inherits. */
     private static final Set<String> BASE_FLUIDS = Set.of(
             "net.minecraft.world.level.material.Fluid", "net.minecraft.world.level.material.FlowingFluid");
@@ -61,12 +78,18 @@ public final class SpreadProber extends RuleProber {
     private final List<Placement> reachableCandidates;
     /** Every fluid, then every block, for the fluids that decide for themselves where they can go. */
     private final List<Placement> allCandidates;
+    /** Every fluid, then the blocks vanilla replaces: the ones it can enter that do not hold a fluid themselves. */
+    private final List<Placement> destroyCandidates;
+    /** Per source state, whether its own spread code is the destroy hook alone. */
+    private final Map<FluidState, Boolean> hookAlone = new HashMap<>();
 
     public SpreadProber(SandboxLevel level, Settler settler, Candidates candidates) {
         super(LOGGER, level, settler, candidates.fluids, "fluid spread", "the fluid spread of", "spread/");
         List<Placement> reachableBlocks = candidates.blocks.stream().filter(SpreadProber::canHoldFluid).toList();
         this.reachableCandidates = concat(candidates.fluids, reachableBlocks);
         this.allCandidates = concat(candidates.fluids, candidates.blocks);
+        this.destroyCandidates = concat(candidates.fluids,
+                reachableBlocks.stream().filter(placement -> !(placement.block().getBlock() instanceof LiquidBlockContainer)).toList());
         LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
                 candidates.fluids.size(), reachableBlocks.size(), candidates.blocks.size());
     }
@@ -84,6 +107,9 @@ public final class SpreadProber extends RuleProber {
     /** Both forms of a fluid get the same list: every block when one form decides its own reach. */
     @Override
     List<Placement> candidates(FluidState source, List<FluidState> probed) {
+        if (hookAlone(source)) {
+            return destroyCandidates;
+        }
         Fluid still = FluidInteractionRecipe.stillForm(source);
         for (FluidState form : probed) {
             if (FluidInteractionRecipe.stillForm(form) == still && (forced(still) || declaresAny(form, REACH_METHODS))) {
@@ -100,7 +126,56 @@ public final class SpreadProber extends RuleProber {
 
     @Override
     void callHook(SandboxLevel level, FluidState source, BlockPos target, Placement candidate) {
-        source.tick(level, SandboxLevel.ORIGIN);
+        if (hookAlone(source) && DESTROY_HOOK_HANDLE != null) {
+            callDestroyHook(DESTROY_HOOK_HANDLE, (FlowingFluid) source.getType(), level, SandboxLevel.ORIGIN.offset(target), candidate.block());
+        } else {
+            source.tick(level, SandboxLevel.ORIGIN);
+        }
+    }
+
+    private static @Nullable MethodHandle findDestroyHook() {
+        try {
+            Method hook = FlowingFluid.class.getDeclaredMethod("beforeDestroyingBlock", LevelAccessor.class, BlockPos.class, BlockState.class);
+            hook.setAccessible(true);
+            return MethodHandles.lookup().unreflect(hook);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LOGGER.debug("FlowingFluid.beforeDestroyingBlock is not reachable; every fluid gets the whole tick", e);
+            return null;
+        }
+    }
+
+    private static void callDestroyHook(MethodHandle hook, FlowingFluid fluid, SandboxLevel level, BlockPos pos, BlockState state) {
+        try {
+            hook.invokeExact(fluid, (LevelAccessor) level, pos, state);
+        } catch (RuntimeException | LinkageError e) {
+            throw e;
+        } catch (Throwable e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The destroy hook takes the candidate as an argument, so no run answers for another. */
+    @Override
+    boolean readsTargetThroughLevel(FluidState source) {
+        return !hookAlone(source);
+    }
+
+    /**
+     * Whether this source state's own spread code is the destroy hook alone, so the tier calls that hook by
+     * hand. A forced fluid always gets the whole tick, since its rule can live outside its classes.
+     */
+    private boolean hookAlone(FluidState source) {
+        return hookAlone.computeIfAbsent(source, state -> {
+            boolean alone = DESTROY_HOOK_HANDLE != null
+                    && state.getType() instanceof FlowingFluid
+                    && !forced(FluidInteractionRecipe.stillForm(state))
+                    && declared(state.getType().getClass(), SPREAD_METHODS, SpreadProber::isBaseFluid).equals(DESTROY_HOOK);
+            if (alone) {
+                LOGGER.debug("Probing the fluid spread of {} through beforeDestroyingBlock alone, its only own spread code",
+                        BuiltInRegistries.FLUID.getKey(state.getType()));
+            }
+            return alone;
+        });
     }
 
     /** A spreading fluid writes its own states. Evaporation writes air. Only a different block or fluid is a result. */
