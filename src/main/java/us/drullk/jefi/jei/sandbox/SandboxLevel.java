@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -24,7 +26,10 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.util.AbortableIterationConsumer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.entity.EntityTypeTest;
+import net.minecraft.world.level.entity.LevelEntityGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -428,6 +433,44 @@ public final class SandboxLevel extends VirtualLevel {
         LOGGER.debug("Denied attempted entity spawn {}", entity.getType());
         return false;
     }
+
+    /**
+     * A hook that looks for entities finds none. Gander's level has no entity getter, and vanilla's entity
+     * queries throw on that, which stops a hook such as one that reacts to a dropped item.
+     */
+    @Override
+    protected LevelEntityGetter<Entity> getEntities() {
+        return NO_ENTITIES;
+    }
+
+    private static final LevelEntityGetter<Entity> NO_ENTITIES = new LevelEntityGetter<>() {
+        @Override
+        public @Nullable Entity get(int id) {
+            return null;
+        }
+
+        @Override
+        public @Nullable Entity get(UUID uuid) {
+            return null;
+        }
+
+        @Override
+        public Iterable<Entity> getAll() {
+            return List.of();
+        }
+
+        @Override
+        public <U extends Entity> void get(EntityTypeTest<Entity, U> test, AbortableIterationConsumer<U> consumer) {
+        }
+
+        @Override
+        public void get(AABB boundingBox, Consumer<Entity> consumer) {
+        }
+
+        @Override
+        public <U extends Entity> void get(EntityTypeTest<Entity, U> test, AABB bounds, AbortableIterationConsumer<U> consumer) {
+        }
+    };
 
     @Override
     public @Nullable BlockEntity getBlockEntity(BlockPos pos) {
