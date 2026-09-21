@@ -66,11 +66,14 @@ public abstract class RuleProber {
     private final Map<Class<?>, Set<String>> declaredMethods = new HashMap<>();
     /** The settled result of every arrangement of the type in progress. The inert check reads it. */
     private final Map<Arrangement, Map<BlockPos, BlockState>> settled = new HashMap<>();
+    /** What the hook runs of the type in progress read at each target, per source form. */
+    private final Map<Target, RunMemo<Map<BlockPos, BlockState>>> memos = new HashMap<>();
     private final Comparator<Map.Entry<Outcome, Group>> withinOwner = Comparator
             .<Map.Entry<Outcome, Group>>comparingInt(entry -> targets().indexOf(entry.getKey().target()))
             .thenComparing(entry -> primaryResultKey(entry.getKey()), Comparator.nullsLast(RecipeIds.LOCATION_ORDER))
             .thenComparing(entry -> describe(entry.getKey().results()));
     private int runs;
+    private int skippedRuns;
     private int skippedTypes;
     private int dropped;
 
@@ -119,6 +122,11 @@ public abstract class RuleProber {
         return skippedTypes;
     }
 
+    /** The candidate runs an earlier run at the same target answered for. */
+    int skippedRuns() {
+        return skippedRuns;
+    }
+
     /** Whether the config names this fluid. The config makes every tier probe the fluid. */
     protected boolean forced(Fluid still) {
         return forced.contains(String.valueOf(BuiltInRegistries.FLUID.getKey(still)));
@@ -162,6 +170,7 @@ public abstract class RuleProber {
         int runsBefore = runs;
         int droppedBefore = dropped;
         settled.clear();
+        memos.clear();
 
         Map<Outcome, Group> outcomes = new LinkedHashMap<>();
         for (BlockPos target : targets()) {
@@ -293,33 +302,52 @@ public abstract class RuleProber {
     }
 
     /**
-     * Places one arrangement and calls the hook. Returns the writes that change a position, keyed by offset
-     * from the source. A write of air, of what the tier placed, or of an own fluid's state is not a change.
+     * Places one arrangement and calls the hook, unless an earlier run at the target already answers for this
+     * candidate ({@link RunMemo}). Returns the writes that change a position, keyed by offset from the source.
+     * A write of air, of what the tier placed, or of an own fluid's state is not a change.
      */
     private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
-        runs++;
         Map<BlockPos, Placement> scene = scene(source, target, candidate);
-        level.reset();
-        scene.forEach(level::place);
-        level.beginTracking();
-        try {
-            callHook(level, source, target, candidate);
-        } catch (RuntimeException | LinkageError e) {
-            logger.debug("{} with {} threw while probing {}", source.getFluidType().getDescriptionId(),
-                    candidate.describe().getString(), tier, e);
-            return Map.of();
-        } finally {
-            level.endTracking();
+        RunMemo<Map<BlockPos, BlockState>> memo = memos.computeIfAbsent(new Target(source, target), key -> new RunMemo<>());
+        Map<BlockPos, BlockState> writes = memo.lookup(candidate);
+        if (writes != null) {
+            skippedRuns++;
+        } else {
+            writes = callHook(source, target, candidate, scene);
+            if (writes == null) {
+                return Map.of();
+            }
+            memo.record(candidate, level.watchedReads(), writes);
         }
         Set<Fluid> own = ownFluids(source, candidate);
         Map<BlockPos, BlockState> results = new LinkedHashMap<>();
-        level.writes().forEach((pos, written) -> {
+        writes.forEach((pos, written) -> {
             Placement placed = scene.get(pos);
             if (transformed(placed != null ? placed.block() : AIR, written, own)) {
                 results.put(pos.subtract(SandboxLevel.ORIGIN), written);
             }
         });
         return results;
+    }
+
+    /** Places the scene, calls the hook with the target watched, and returns every write. Null when the hook threw. */
+    private @Nullable Map<BlockPos, BlockState> callHook(FluidState source, BlockPos target, Placement candidate,
+                                                         Map<BlockPos, Placement> scene) {
+        runs++;
+        level.reset();
+        scene.forEach(level::place);
+        level.beginTracking();
+        level.watch(SandboxLevel.ORIGIN.offset(target));
+        try {
+            callHook(level, source, target, candidate);
+        } catch (RuntimeException | LinkageError e) {
+            logger.debug("{} with {} threw while probing {}", source.getFluidType().getDescriptionId(),
+                    candidate.describe().getString(), tier, e);
+            return null;
+        } finally {
+            level.endTracking();
+        }
+        return level.writes();
     }
 
     /**
@@ -403,6 +431,10 @@ public abstract class RuleProber {
     }
 
     private record Arrangement(FluidState source, BlockPos target, Placement candidate) {
+    }
+
+    /** One source form at one target: the runs that share a memo. */
+    private record Target(FluidState source, BlockPos target) {
     }
 
     private record Outcome(@Nullable String owner, BlockPos target, Map<BlockPos, BlockState> results) {

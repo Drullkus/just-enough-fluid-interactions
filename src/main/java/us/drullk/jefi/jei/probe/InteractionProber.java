@@ -104,6 +104,8 @@ public final class InteractionProber {
                 found.put(type, prober.probe(type, interactions));
             }
         }
+        LOGGER.debug("Skipped {} candidate run(s) of the fluid interactions whose predicate did not read the neighbor",
+                prober.skippedRuns());
         return new Tier(found, count, System.nanoTime() - start);
     }
 
@@ -117,6 +119,7 @@ public final class InteractionProber {
             }
         }
         LOGGER.debug("Skipped the {} of {} of {} fluid type(s) {}", tier, prober.skippedTypes(), types.size(), inherit);
+        LOGGER.debug("Skipped {} candidate run(s) of the {} whose hook did not read the target", prober.skippedRuns(), tier);
         return new Tier(found, count(found), System.nanoTime() - start);
     }
 

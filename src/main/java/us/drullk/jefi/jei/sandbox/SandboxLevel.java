@@ -89,9 +89,17 @@ public final class SandboxLevel extends VirtualLevel {
     private final NeighborUpdater updater = new CollectingNeighborUpdater(this, MAX_CHAINED_NEIGHBOR_UPDATES);
     private final SandboxTicks<Fluid> fluidTicks = new SandboxTicks<>();
     private final SandboxTicks<Block> blockTicks = new SandboxTicks<>();
+    /** A bit of {@link #watchedReads()}: the block state of the watched position was read. */
+    public static final int READ_BLOCK = 1;
+    /** A bit of {@link #watchedReads()}: the fluid state of the watched position was read. */
+    public static final int READ_FLUID = 2;
+
     private int writesSinceReset;
     private boolean tracking;
     private boolean trackingReads;
+    private boolean watching;
+    private long watchedKey;
+    private int watchedReads;
     private boolean live;
     private long gameTime;
     private int blockTicksRequested;
@@ -124,6 +132,8 @@ public final class SandboxLevel extends VirtualLevel {
         blockTicks.clear();
         tracking = false;
         trackingReads = false;
+        watching = false;
+        watchedReads = 0;
         live = false;
         gameTime = 0;
         random.setSeed(SEED);
@@ -244,14 +254,34 @@ public final class SandboxLevel extends VirtualLevel {
         return reads.isEmpty() ? List.of() : List.copyOf(reads);
     }
 
+    /**
+     * Starts to record which kinds of read hit one position. A tier watches the target of a run. Between two
+     * candidates at one target, the level differs only there. So a hook that never reads the target gives every
+     * candidate the same answer, and a hook that reads only the fluid state there gives the same answer to every
+     * candidate with that fluid state.
+     */
+    public void watch(BlockPos pos) {
+        watchedKey = pos.asLong();
+        watching = true;
+        watchedReads = 0;
+    }
+
+    /** The kinds of read that hit the watched position since {@link #watch}: {@link #READ_BLOCK}, {@link #READ_FLUID}. */
+    public int watchedReads() {
+        return watchedReads;
+    }
+
     /** Positions written through any {@code setBlock} variant, in write order, with the final state written. */
     public Map<BlockPos, BlockState> writes() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(writes));
     }
 
-    private void note(BlockPos pos) {
+    private void note(BlockPos pos, int kind) {
         if (trackingReads) {
             reads.add(pos.immutable());
+        }
+        if (watching && pos.asLong() == watchedKey) {
+            watchedReads |= kind;
         }
     }
 
@@ -264,13 +294,13 @@ public final class SandboxLevel extends VirtualLevel {
 
     @Override
     public BlockState getBlockState(BlockPos pos) {
-        note(pos);
+        note(pos, READ_BLOCK);
         return blockAt(pos);
     }
 
     @Override
     public FluidState getFluidState(BlockPos pos) {
-        note(pos);
+        note(pos, READ_FLUID);
         FluidState fluid = fluids.get(pos.asLong());
         return fluid != null ? fluid : blockAt(pos).getFluidState();
     }

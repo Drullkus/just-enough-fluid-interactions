@@ -61,6 +61,7 @@ final class RegistryProber {
     private final SandboxLevel level;
     private final Settler settler;
     private final Candidates candidates;
+    private int skippedRuns;
 
     RegistryProber(SandboxLevel level, Settler settler, Candidates candidates) {
         this.level = level;
@@ -99,16 +100,33 @@ final class RegistryProber {
     /** The arrangements one source state fires the interaction in. The search runs only when the sweeps find none. */
     private List<Hit> hits(InteractionInformation interaction, FluidState source) {
         List<Hit> hits = new ArrayList<>();
-        for (Placement candidate : candidates.fluids) {
-            tryHit(interaction, source, Map.of(NEIGHBOR, candidate)).ifPresent(hits::add);
-        }
-        for (Placement candidate : candidates.blocks) {
-            tryHit(interaction, source, Map.of(NEIGHBOR, candidate)).ifPresent(hits::add);
-        }
+        RunMemo<Boolean> memo = new RunMemo<>();
+        sweep(interaction, source, candidates.fluids, memo, hits);
+        sweep(interaction, source, candidates.blocks, memo, hits);
         if (hits.isEmpty()) {
             new Search(interaction, source).run().ifPresent(hits::add);
         }
         return hits;
+    }
+
+    /**
+     * Tries every candidate beside the source. A candidate an earlier run already answers for is skipped
+     * ({@link RunMemo}): the predicate fails for it without a run.
+     */
+    private void sweep(InteractionInformation interaction, FluidState source, List<Placement> sweep,
+                       RunMemo<Boolean> memo, List<Hit> hits) {
+        for (Placement candidate : sweep) {
+            if (memo.lookup(candidate) != null) {
+                skippedRuns++;
+                continue;
+            }
+            tryHit(interaction, source, Map.of(NEIGHBOR, candidate), memo).ifPresent(hits::add);
+        }
+    }
+
+    /** The candidate runs an earlier run of the same predicate answered for. */
+    int skippedRuns() {
+        return skippedRuns;
     }
 
     private static List<FluidInteractionRecipe> order(ResourceLocation typeKey, List<ProbedInteraction> probed) {
@@ -146,9 +164,13 @@ final class RegistryProber {
      * nothing did not fire. What it wrote is not the answer. It is the sign that the arrangement is one to
      * settle. It is also the measure for the settled level.
      */
-    private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
+    private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements,
+                                 @Nullable RunMemo<Boolean> memo) {
         Run run = run(interaction, source, requirements, false);
         if (!run.passed()) {
+            if (memo != null) {
+                memo.record(requirements.get(NEIGHBOR), run.watched(), Boolean.FALSE);
+            }
             return Optional.empty();
         }
         Map<BlockPos, BlockState> writes = new LinkedHashMap<>(run.writes());
@@ -178,6 +200,7 @@ final class RegistryProber {
         level.placeFluid(SandboxLevel.ORIGIN, source);
         requirements.forEach(level::place);
         level.beginTracking(reads);
+        level.watch(NEIGHBOR);
         boolean passed;
         try {
             passed = interaction.predicate().test(level, SandboxLevel.ORIGIN, NEIGHBOR, source);
@@ -186,7 +209,7 @@ final class RegistryProber {
         } finally {
             level.endTracking();
         }
-        return new Run(passed, level.reads(), level.writes());
+        return new Run(passed, level.watchedReads(), level.reads(), level.writes());
     }
 
     /**
@@ -208,7 +231,7 @@ final class RegistryProber {
         Optional<Hit> run() {
             Run base = RegistryProber.this.run(interaction, source, fixed, true);
             if (base.passed()) {
-                return tryHit(interaction, source, fixed);
+                return tryHit(interaction, source, fixed, null);
             }
             seen.addAll(base.reads());
             rounds:
@@ -219,7 +242,7 @@ final class RegistryProber {
                     }
                     switch (fix(position)) {
                         case PASSED -> {
-                            return tryHit(interaction, source, fixed);
+                            return tryHit(interaction, source, fixed, null);
                         }
                         case ADVANCED -> {
                             continue rounds;
@@ -347,7 +370,7 @@ final class RegistryProber {
         }
     }
 
-    private record Run(boolean passed, List<BlockPos> reads, Map<BlockPos, BlockState> writes) {
+    private record Run(boolean passed, int watched, List<BlockPos> reads, Map<BlockPos, BlockState> writes) {
     }
 
     /**
