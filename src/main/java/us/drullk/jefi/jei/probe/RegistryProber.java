@@ -147,7 +147,7 @@ final class RegistryProber {
      * settle. It is also the measure for the settled level.
      */
     private Optional<Hit> tryHit(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
-        Run run = run(interaction, source, requirements);
+        Run run = run(interaction, source, requirements, false);
         if (!run.passed()) {
             return Optional.empty();
         }
@@ -169,12 +169,15 @@ final class RegistryProber {
         return Optional.of(new Hit(new LinkedHashMap<>(requirements), writes, wroteFromPredicate));
     }
 
-    /** Places the arrangement and runs only the predicate. The sandbox records what it read and wrote. */
-    private Run run(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements) {
+    /**
+     * Places the arrangement and runs only the predicate. The sandbox records what the predicate wrote, and what
+     * it read when {@code reads} is set. Only the search reads that list.
+     */
+    private Run run(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements, boolean reads) {
         level.reset();
         level.placeFluid(SandboxLevel.ORIGIN, source);
         requirements.forEach(level::place);
-        level.beginTracking();
+        level.beginTracking(reads);
         boolean passed;
         try {
             passed = interaction.predicate().test(level, SandboxLevel.ORIGIN, NEIGHBOR, source);
@@ -203,7 +206,7 @@ final class RegistryProber {
         }
 
         Optional<Hit> run() {
-            Run base = RegistryProber.this.run(interaction, source, fixed);
+            Run base = RegistryProber.this.run(interaction, source, fixed, true);
             if (base.passed()) {
                 return tryHit(interaction, source, fixed);
             }
@@ -240,7 +243,7 @@ final class RegistryProber {
                     return Step.EXHAUSTED;
                 }
                 fixed.put(position, candidate);
-                Run attempt = RegistryProber.this.run(interaction, source, fixed);
+                Run attempt = RegistryProber.this.run(interaction, source, fixed, true);
                 if (attempt.passed()) {
                     return Step.PASSED;
                 }

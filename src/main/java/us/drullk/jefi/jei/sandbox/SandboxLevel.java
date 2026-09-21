@@ -17,7 +17,7 @@ import us.drullk.jefi.jei.probe.Placement;
 import com.mojang.logging.LogUtils;
 
 import dev.compactmods.gander.level.VirtualLevel;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.Hash;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -71,14 +71,22 @@ public final class SandboxLevel extends VirtualLevel {
     /** What a server level allows. Gander builds its own updater with a limit of zero. That limit skips every update. */
     private static final int MAX_CHAINED_NEIGHBOR_UPDATES = 1_000_000;
 
-    private final Long2ObjectMap<BlockState> blocks = new Long2ObjectOpenHashMap<>();
-    private final Long2ObjectMap<FluidState> fluids = new Long2ObjectOpenHashMap<>();
+    /**
+     * The number of writes a quiet hook run stays under. A run that writes more than this, such as a settle
+     * that lets a fluid pour, has grown the tables past their default capacity.
+     */
+    private static final int SMALL_RUN = Hash.DEFAULT_INITIAL_SIZE;
+
+    private final Long2ObjectOpenHashMap<BlockState> blocks = new Long2ObjectOpenHashMap<>();
+    private final Long2ObjectOpenHashMap<FluidState> fluids = new Long2ObjectOpenHashMap<>();
     private final Set<BlockPos> reads = new LinkedHashSet<>();
     private final Map<BlockPos, BlockState> writes = new LinkedHashMap<>();
     private final NeighborUpdater updater = new CollectingNeighborUpdater(this, MAX_CHAINED_NEIGHBOR_UPDATES);
     private final SandboxTicks<Fluid> fluidTicks = new SandboxTicks<>();
     private final SandboxTicks<Block> blockTicks = new SandboxTicks<>();
+    private int writesSinceReset;
     private boolean tracking;
+    private boolean trackingReads;
     private boolean live;
     private long gameTime;
     private int blockTicksRequested;
@@ -90,15 +98,26 @@ public final class SandboxLevel extends VirtualLevel {
 
     // ---- scene authoring -------------------------------------------------------------------------------------
 
-    /** Removes every block, fluid, scheduled tick and recording, and returns the level to its quiet mode. */
+    /**
+     * Removes every block, fluid, scheduled tick and recording, and returns the level to its quiet mode. A clear
+     * costs a table's whole capacity, not its size, and a table never shrinks on its own. So after a run that
+     * grew the tables, this method trims them back, and the clear of every later small run stays small.
+     */
     public void reset() {
+        boolean grown = writesSinceReset > SMALL_RUN;
         blocks.clear();
         fluids.clear();
+        if (grown) {
+            blocks.trim(SMALL_RUN);
+            fluids.trim(SMALL_RUN);
+        }
+        writesSinceReset = 0;
         reads.clear();
         writes.clear();
         fluidTicks.clear();
         blockTicks.clear();
         tracking = false;
+        trackingReads = false;
         live = false;
         gameTime = 0;
     }
@@ -112,6 +131,7 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     public void placeBlock(BlockPos pos, BlockState state) {
+        writesSinceReset++;
         long key = pos.asLong();
         fluids.remove(key);
         if (state.isAir()) {
@@ -187,20 +207,34 @@ public final class SandboxLevel extends VirtualLevel {
 
     // ---- tracking -------------------------------------------------------------------------------------------
 
-    /** Clears recorded reads and writes and starts recording. */
+    /** Clears the recorded writes and starts recording them. Reads are not recorded. */
     public void beginTracking() {
-        reads.clear();
+        beginTracking(false);
+    }
+
+    /**
+     * Clears the recorded reads and writes and starts recording. A recorded read costs an allocation and a hash
+     * per position, and a fluid tick reads dozens of positions. So reads are recorded only when {@code reads} is
+     * set, for the one caller that uses the list.
+     */
+    public void beginTracking(boolean reads) {
+        this.reads.clear();
         writes.clear();
         tracking = true;
+        trackingReads = reads;
     }
 
     public void endTracking() {
         tracking = false;
+        trackingReads = false;
     }
 
-    /** Positions read through {@link #getBlockState} or {@link #getFluidState}, in first-read order. */
+    /**
+     * Positions read through {@link #getBlockState} or {@link #getFluidState}, in first-read order. Empty unless
+     * {@link #beginTracking(boolean)} asked for them.
+     */
     public List<BlockPos> reads() {
-        return List.copyOf(reads);
+        return reads.isEmpty() ? List.of() : List.copyOf(reads);
     }
 
     /** Positions written through any {@code setBlock} variant, in write order, with the final state written. */
@@ -209,7 +243,7 @@ public final class SandboxLevel extends VirtualLevel {
     }
 
     private void note(BlockPos pos) {
-        if (tracking) {
+        if (trackingReads) {
             reads.add(pos.immutable());
         }
     }
@@ -440,12 +474,14 @@ public final class SandboxLevel extends VirtualLevel {
      */
     private static final class SandboxTicks<T> implements LevelTickAccess<T> {
         private final PriorityQueue<ScheduledTick<T>> queue = new PriorityQueue<>(ScheduledTick.DRAIN_ORDER);
-        private final Map<Slot, ScheduledTick<T>> pending = new HashMap<>();
+        private Map<Slot, ScheduledTick<T>> pending = new HashMap<>();
+        private int scheduledSinceClear;
 
         @Override
         public void schedule(ScheduledTick<T> tick) {
             if (pending.putIfAbsent(new Slot(tick.pos(), tick.type()), tick) == null) {
                 queue.add(tick);
+                scheduledSinceClear++;
             }
         }
 
@@ -480,9 +516,15 @@ public final class SandboxLevel extends VirtualLevel {
             return due;
         }
 
+        /** A clear walks the map's whole table, so a map that a settle grew is replaced, not cleared. */
         void clear() {
             queue.clear();
-            pending.clear();
+            if (scheduledSinceClear > SMALL_RUN) {
+                pending = new HashMap<>();
+            } else {
+                pending.clear();
+            }
+            scheduledSinceClear = 0;
         }
 
         private record Slot(BlockPos pos, Object type) {
