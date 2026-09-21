@@ -62,6 +62,7 @@ final class RegistryProber {
     private final Settler settler;
     private final Candidates candidates;
     private int skippedRuns;
+    private int shortlisted;
 
     RegistryProber(SandboxLevel level, Settler settler, Candidates candidates) {
         this.level = level;
@@ -97,12 +98,23 @@ final class RegistryProber {
         return probe.result();
     }
 
-    /** The arrangements one source state fires the interaction in. The search runs only when the sweeps find none. */
+    /**
+     * The arrangements one source state fires the interaction in. NeoForge's own type predicate passes only for
+     * the fluids of its type ({@link TypePredicate}), so those go first, and the full sweeps run only when none
+     * of them passes. The search runs only when the sweeps find none.
+     */
     private List<Hit> hits(InteractionInformation interaction, FluidState source) {
         List<Hit> hits = new ArrayList<>();
         RunMemo<Boolean> memo = new RunMemo<>();
-        sweep(interaction, source, candidates.fluids, memo, hits);
-        sweep(interaction, source, candidates.blocks, memo, hits);
+        FluidType only = TypePredicate.typeOf(interaction.predicate());
+        if (only != null) {
+            shortlisted++;
+            sweep(interaction, source, candidates.fluidsOf(only), memo, hits);
+        }
+        if (hits.isEmpty()) {
+            sweep(interaction, source, candidates.fluids, memo, hits);
+            sweep(interaction, source, candidates.blocks, memo, hits);
+        }
         if (hits.isEmpty()) {
             new Search(interaction, source).run().ifPresent(hits::add);
         }
@@ -127,6 +139,11 @@ final class RegistryProber {
     /** The candidate runs an earlier run of the same predicate answered for. */
     int skippedRuns() {
         return skippedRuns;
+    }
+
+    /** The sweeps that tried the predicate's own fluid type first. */
+    int shortlisted() {
+        return shortlisted;
     }
 
     private static List<FluidInteractionRecipe> order(ResourceLocation typeKey, List<ProbedInteraction> probed) {

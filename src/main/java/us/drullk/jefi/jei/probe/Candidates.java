@@ -1,7 +1,9 @@
 package us.drullk.jefi.jei.probe;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -25,6 +27,7 @@ import net.neoforged.neoforge.fluids.FluidType;
 final class Candidates {
     /** Every fluid in still form, then in a full flowing form when it has one. */
     final List<Placement> fluids;
+    private final Map<FluidType, List<Placement>> fluidsByType = new HashMap<>();
     /** The default state of every block that holds no fluid. */
     final List<Placement> blocks;
     /** The still form of every fluid, then the blocks. The multi-position search of the registry tier tries these. */
@@ -57,8 +60,16 @@ final class Candidates {
         search.addAll(stillFluids);
         search.addAll(blocks);
         this.fluids = List.copyOf(fluids);
+        for (Placement placement : this.fluids) {
+            fluidsByType.computeIfAbsent(placement.effectiveFluid().getFluidType(), key -> new ArrayList<>()).add(placement);
+        }
         this.blocks = List.copyOf(blocks);
         this.stillFluidsAndBlocks = List.copyOf(search);
+    }
+
+    /** Both forms of every fluid of one type, in the order of {@link #fluids}. Empty for a type without a block. */
+    List<Placement> fluidsOf(FluidType type) {
+        return fluidsByType.getOrDefault(type, List.of());
     }
 
     /**

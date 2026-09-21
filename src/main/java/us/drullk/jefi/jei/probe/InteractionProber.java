@@ -106,6 +106,8 @@ public final class InteractionProber {
         }
         LOGGER.debug("Skipped {} candidate run(s) of the fluid interactions whose predicate did not read the neighbor",
                 prober.skippedRuns());
+        LOGGER.debug("Swept the predicate's own fluid type first in {} sweep(s) of NeoForge's fluid type predicate",
+                prober.shortlisted());
         return new Tier(found, count, System.nanoTime() - start);
     }
 
