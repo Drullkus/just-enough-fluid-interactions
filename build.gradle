@@ -145,6 +145,35 @@ neoForge {
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 
+        // Runs in a test pack. The pack's jars live in test-pack/mods, which is gitignored. FML loads every jar in
+        // the run's own mods folder, so syncTestPack copies the pack there without this mod's own jar, which
+        // the run already has from the source sets. clientPack is a plain client; clientPackTest is the JEI
+        // smoke test in the pack, which creates a world, probes, and exits. -Pjfr=<file> records a JFR profile.
+        // NeoForge's gametest scan loads every mod's gametest classes, and a pack mod's tests can reference
+        // mods the pack lacks. Two switches turn the scan off: the property the client template sets, and the
+        // in-IDE flag, which the dev source set's PackRun clears for the pack property.
+        clientPack {
+            client()
+            gameDirectory = project.file('test-pack/run')
+            systemProperty 'justenoughfluidinteractions.pack', 'true'
+            systemProperty 'neoforge.enableGameTest', 'false'
+            if (project.hasProperty('jfr')) {
+                jvmArgument "-XX:StartFlightRecording=settings=profile,duration=600s,filename=${project.property('jfr')}"
+            }
+        }
+
+        clientPackTest {
+            client()
+            gameDirectory = project.file('test-pack/run')
+            systemProperty 'justenoughfluidinteractions.pack', 'true'
+            systemProperty 'neoforge.enableGameTest', 'false'
+            systemProperty 'justenoughfluidinteractions.jeiautotest', 'true'
+            programArguments.addAll '--width', '1280', '--height', '720'
+            if (project.hasProperty('jfr')) {
+                jvmArgument "-XX:StartFlightRecording=settings=profile,duration=600s,filename=${project.property('jfr')}"
+            }
+        }
+
         data {
             data()
             // example of overriding the workingDirectory set in configureEach above, uncomment if you want to use it
@@ -189,6 +218,17 @@ neoForge {
 // This configuration should be used instead of 'runtimeOnly' to declare
 // a dependency that will be present for runtime testing but that is
 // "optional", meaning it will not be pulled by dependents of this mod.
+tasks.register('syncTestPack', Sync) {
+    from 'test-pack/mods'
+    into 'test-pack/run/mods'
+    exclude 'justenoughfluidinteractions-*.jar'
+    // A mixin of the bundled Accessories mod targets a compiled lambda name, and a development run's
+    // recompiled Minecraft numbers its lambdas differently. Deep Aether requires the Aether.
+    exclude 'aether-*.jar', 'deep_aether-*.jar'
+}
+tasks.named('runClientPack') { dependsOn 'syncTestPack' }
+tasks.named('runClientPackTest') { dependsOn 'syncTestPack' }
+
 configurations {
     runtimeClasspath.extendsFrom localRuntime
     devImplementation.extendsFrom implementation
