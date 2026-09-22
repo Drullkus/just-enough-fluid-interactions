@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -67,18 +68,17 @@ public final class InteractionProber {
 
     private final RegistryAccess access;
     private final Candidates candidates;
-    /** The threads' own sandboxes and probers. One worker when the probe runs on the calling thread. */
-    private List<Worker> workers;
+    /** The threads a tier runs on. One from the start when the config says so, and one after the pool fails. */
+    private int threads;
+    /** Every worker made so far, for the counters. Each thread of a tier makes its own. */
+    private final List<Worker> workers = new CopyOnWriteArrayList<>();
+    /** The worker of the calling thread, made when the first tier runs there. */
+    private @Nullable Worker serial;
 
     public InteractionProber(RegistryAccess access) {
         this.access = access;
         this.candidates = new Candidates();
-        int threads = threads();
-        List<Worker> workers = new ArrayList<>(threads);
-        for (int i = 0; i < threads; i++) {
-            workers.add(new Worker(access, candidates));
-        }
-        this.workers = workers;
+        this.threads = threads();
     }
 
     /**
@@ -90,7 +90,7 @@ public final class InteractionProber {
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
         List<FluidType> types = probable(orderedTypes(registered.keySet()), registered);
-        LOGGER.debug("Probing on {} thread(s)", workers.size());
+        LOGGER.debug("Probing on {} thread(s)", threads);
 
         Tier registry = registryTier(types, registered);
         counters("registry");
@@ -137,7 +137,11 @@ public final class InteractionProber {
         return Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() - 1, DEFAULT_MAX_THREADS));
     }
 
-    /** One thread's sandbox, settler and probers. A worker probes one fluid type at a time. */
+    /**
+     * One thread's sandbox, settler and probers. A worker probes one fluid type at a time. The thread that uses
+     * a worker makes it, because a mod can bind the random source of a level to the thread that constructs the
+     * level.
+     */
     private static final class Worker {
         final SandboxLevel level;
         final Settler settler;
@@ -197,17 +201,17 @@ public final class InteractionProber {
      */
     private <T> Map<FluidType, T> phase(String tier, List<FluidType> types, BiFunction<Worker, FluidType, T> task) {
         Map<FluidType, T> results = new ConcurrentHashMap<>();
-        if (workers.size() > 1) {
+        if (threads > 1) {
             try {
                 parallel(types, (worker, type) -> results.put(type, task.apply(worker, type)));
             } catch (RuntimeException | Error e) {
-                LOGGER.warn("Probing the {} on {} threads failed. The probe continues on one thread.", tier, workers.size(), e);
+                LOGGER.warn("Probing the {} on {} threads failed. The probe continues on one thread.", tier, threads, e);
                 results.clear();
-                workers = List.of(new Worker(access, candidates));
+                threads = 1;
             }
         }
-        if (workers.size() == 1) {
-            Worker worker = workers.getFirst();
+        if (threads == 1) {
+            Worker worker = serial();
             for (FluidType type : types) {
                 results.put(type, task.apply(worker, type));
             }
@@ -222,21 +226,31 @@ public final class InteractionProber {
         return ordered;
     }
 
+    private Worker serial() {
+        if (serial == null) {
+            serial = new Worker(access, candidates);
+            workers.add(serial);
+        }
+        return serial;
+    }
+
     /**
-     * Every worker takes the next type until none is left. The first failure stops all of them. A type that a
-     * worker holds for longer than the config allows is a failure too: the worker stays behind, a daemon with
-     * one sandbox, and the other workers take no further type.
+     * Every thread makes its worker and takes the next type until none is left. The first failure stops all of
+     * them. A type that a thread holds for longer than the config allows is a failure too: the thread stays
+     * behind, a daemon with one sandbox, and the other threads take no further type.
      */
     private void parallel(List<FluidType> types, BiConsumer<Worker, FluidType> task) {
         AtomicInteger next = new AtomicInteger();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        List<Thread> threads = new ArrayList<>(workers.size());
-        List<Progress> progress = new ArrayList<>(workers.size());
-        for (Worker worker : workers) {
+        List<Thread> threads = new ArrayList<>(this.threads);
+        List<Progress> progress = new ArrayList<>(this.threads);
+        for (int n = 0; n < this.threads; n++) {
             Progress current = new Progress();
             progress.add(current);
             Thread thread = new Thread(() -> {
                 try {
+                    Worker worker = new Worker(access, candidates);
+                    workers.add(worker);
                     for (int i; (i = next.getAndIncrement()) < types.size() && failure.get() == null; ) {
                         current.start(types.get(i));
                         task.accept(worker, types.get(i));
