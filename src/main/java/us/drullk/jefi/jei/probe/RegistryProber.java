@@ -365,7 +365,7 @@ final class RegistryProber {
             }
             LOGGER.debug("No probe of fluid interaction {} succeeded", this);
             return failed(first != null
-                    ? Texts.preempted(firstSource, firstNeighbor, first.found(), first.wrote())
+                    ? Texts.preempted(firstSource, firstNeighbor, first.found(), first.wrote(), owner)
                     : Texts.unable(type, owner));
         }
 

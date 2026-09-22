@@ -52,19 +52,19 @@ public final class Texts {
      * source into, given the neighbor beside it. The second sentence states what the source changes into in the
      * world, or that it does not change.
      */
-    public static MutableComponent preempted(FluidState source, @Nullable Placement neighbor, BlockState found, BlockState wrote) {
+    public static MutableComponent preempted(FluidState source, @Nullable Placement neighbor, BlockState found, BlockState wrote, @Nullable String owner) {
         Component sourceName = Placement.ofFluid(source).describe();
         Component foundName = found.getBlock().getName();
         Component wroteName = wrote.getBlock().getName();
         boolean unchanged = found.getBlock() == source.createLegacyBlock().getBlock();
         if (neighbor == null) {
             return unchanged
-                    ? key("preempted.alone.unchanged", sourceName, wroteName, sourceName)
-                    : key("preempted.alone", sourceName, wroteName, sourceName, foundName);
+                    ? key("preempted.alone.unchanged", sourceName, wroteName, sourceName, owner)
+                    : key("preempted.alone", sourceName, wroteName, sourceName, foundName, owner);
         }
         return unchanged
-                ? key("preempted.unchanged", sourceName, neighbor.describe(), wroteName, sourceName)
-                : key("preempted", sourceName, neighbor.describe(), wroteName, sourceName, foundName);
+                ? key("preempted.unchanged", sourceName, neighbor.describe(), wroteName, sourceName, owner)
+                : key("preempted", sourceName, neighbor.describe(), wroteName, sourceName, foundName, owner);
     }
 
     /**
