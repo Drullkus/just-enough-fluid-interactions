@@ -67,7 +67,11 @@ public final class Texts {
                 : key("preempted", sourceName, neighbor.describe(), wroteName, sourceName, foundName);
     }
 
-    /** Describes a position relative to the source fluid, such as "below the source". */
+    /**
+     * Describes a position relative to the source fluid in words: "below-the source", "above-west of the
+     * source", "2 blocks north of the source". Only a position off every axis and outside the cube around
+     * the source falls back to its coordinates.
+     */
     public static MutableComponent offset(BlockPos offset) {
         if (offset.equals(BlockPos.ZERO)) {
             return key("offset.source");
@@ -75,11 +79,25 @@ public final class Texts {
         if (offset.equals(FluidInteractionRecipe.NEIGHBOR_OFFSET)) {
             return key("offset.neighbor");
         }
-        Direction direction = Direction.fromDelta(offset.getX(), offset.getY(), offset.getZ());
+        int x = offset.getX();
+        int y = offset.getY();
+        int z = offset.getZ();
+        Direction direction = Direction.fromDelta(x, y, z);
         if (direction != null) {
             return key("offset." + direction.getSerializedName());
         }
-        return key("offset.at", offset.getX(), offset.getY(), offset.getZ());
+        Direction axis = Direction.fromDelta(Integer.signum(x), Integer.signum(y), Integer.signum(z));
+        if (axis != null) {
+            return key("offset.blocks", Math.abs(x) + Math.abs(y) + Math.abs(z), key("offset." + axis.getSerializedName()));
+        }
+        if (Math.abs(x) > 1 || Math.abs(y) > 1 || Math.abs(z) > 1) {
+            return key("offset.at", x, y, z);
+        }
+        MutableComponent side = key("offset." + (z < 0 ? "north" : z > 0 ? "south" : "") + (x < 0 ? "west" : x > 0 ? "east" : ""));
+        if (y == 0) {
+            return side;
+        }
+        return key(y > 0 ? "offset.upper" : "offset.lower", side);
     }
 
     /** Names one form of a fluid the way a placement line does: "Flowing Poison", "Poison source block". */

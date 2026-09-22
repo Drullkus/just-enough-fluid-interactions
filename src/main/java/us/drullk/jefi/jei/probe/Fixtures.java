@@ -16,7 +16,7 @@ import net.minecraft.world.level.material.FluidState;
  * <p>There are two things. The first is a still source that feeds every flowing part. A flow with nothing above
  * or beside it drains within a tick. The arrangement is then gone before any scheduled tick runs. The second is
  * bedrock under everything that falls without it. A fixture feeds a flow from the side, away from the rest of
- * the arrangement. The recipe scenes draw a flow the same way. A source on top of a flow pours through the
+ * the arrangement. The recipe scenes feed a flow from the side too. A source on top of a flow pours through the
  * arrangement after the interaction consumes what was below it.
  *
  * <p>The settle step and the development grounding run build the same fixtures from here. So the sandbox and a

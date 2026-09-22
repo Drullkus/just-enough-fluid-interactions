@@ -20,20 +20,31 @@ import net.neoforged.neoforge.fluids.FluidStack;
 /**
  * Turns a recipe plus a choice of cycling alternatives into the blocks one scene draws.
  *
- * <p>Whatever is drawn in a flowing form gets a full source block of the same fluid on its far side. Vanilla
- * only shows the flowing top texture while the flow vector is non-zero. That texture needs a higher fluid to
- * flow from. The far side of the source position is the side opposite the neighbor. The far side of the
- * neighbor position is the side away from the source. So a row of up to four blocks reads outward in both
- * directions: neighbor source, flowing neighbor, flowing source, source.
+ * <p>A fluid the recipe verified in its flowing form is drawn flowing, because a flow costs no source block.
+ * A vertical pair has one exception. The block the interaction changes keeps that preference. The other block
+ * only triggers the change, pouring down or sitting below, so it is drawn as a still source whenever the recipe
+ * verified that form. A lava source over flowing water reads as the lava spreading down into the water, and
+ * flowing honey over a lava source reads as the honey arriving.
  *
- * <p>That flowing display shows a fluid arriving sideways from a fed source. This has no vertical analogue,
- * because a fluid never flows upward. A feed block below a flowing one does not read as feeding it. So a
- * recipe whose neighbor offset is vertical draws as two still blocks and nothing else. {@link #neighborIndex}
- * picks the alternative that matches.
+ * <p>Whatever is drawn in a flowing form gets a full source block of the same fluid on one side. Vanilla
+ * only shows the flowing top texture while the flow vector is non-zero. That texture needs a higher fluid to
+ * flow from. Beside the source, the feed sits on the side opposite the neighbor. Beside the neighbor, it sits
+ * on the side away from the source. So a row of up to four blocks reads outward in both directions: neighbor
+ * source, flowing neighbor, flowing source, source.
+ *
+ * <p>A neighbor above or below the source has no far side on the row. A fluid never flows upward, so a feed
+ * below a flow does not read as feeding it. A vertical flow is fed from the south instead. When both blocks of
+ * the pair flow, the neighbor is fed from the west, so the two feeds never stack into a pair of their own. The
+ * default camera looks from the north-east, so neither feed hides the other block.
  */
 public final class SceneArrangement {
     /** Fluid level of a block drawn in its flowing form. Probing uses a full flow, a different value than the one assigned here. */
     public static final int DISPLAY_FLOW_LEVEL = 6;
+
+    /** The side a vertical flow is fed from. */
+    private static final BlockPos SOUTH = new BlockPos(0, 0, 1);
+    /** The side the neighbor of a vertical pair is fed from when the source flows too. */
+    private static final BlockPos WEST = new BlockPos(-1, 0, 0);
 
     private SceneArrangement() {
     }
@@ -48,19 +59,17 @@ public final class SceneArrangement {
         List<Fluid> sources = recipe.sourceFluids();
         if (!sources.isEmpty()) {
             Fluid fluid = sources.get(Math.floorMod(variant.source(), sources.size()));
-            scene.put(BlockPos.ZERO, Placement.ofFluid(vertical ? fluid.defaultFluidState() : sourceForm(recipe, fluid)));
+            scene.put(BlockPos.ZERO, Placement.ofFluid(sourceForm(recipe, fluid)));
         }
         List<Placement> neighbors = recipe.neighbors();
         if (!neighbors.isEmpty()) {
             Placement neighbor = neighbors.get(Math.floorMod(variant.neighbor(), neighbors.size()));
-            scene.put(neighborPos, vertical ? stillForm(neighbor) : displayForm(neighbor));
+            scene.put(neighborPos, displayForm(neighbor));
         }
         scene.putAll(recipe.conditions());
 
-        if (!vertical) {
-            feed(scene, BlockPos.ZERO, BlockPos.ZERO.subtract(neighborPos));
-            feed(scene, neighborPos, neighborPos);
-        }
+        boolean sourceFed = feed(scene, BlockPos.ZERO, vertical ? SOUTH : BlockPos.ZERO.subtract(neighborPos));
+        feed(scene, neighborPos, vertical ? (sourceFed ? WEST : SOUTH) : neighborPos);
 
         if (variant.after()) {
             recipe.results().forEach((pos, state) -> scene.put(pos, Placement.ofBlock(state)));
@@ -86,15 +95,13 @@ public final class SceneArrangement {
      * Index of the neighbor alternative a slot is currently displaying, or 0 when it shows something unexpected.
      *
      * <p>A JEI slot only ever shows a still fluid, so both forms of one fluid look the same in it. When a recipe
-     * holds both, the preferred form is whichever one the scene draws at the neighbor position. The scene draws
-     * the flowing form beside the source. It draws the still form above or below the source. The probe verified
-     * either form.
+     * holds both, the scene draws the form {@link #prefersFlow} names. The probe verified either form.
      */
     public static int neighborIndex(FluidInteractionRecipe recipe, @Nullable ITypedIngredient<?> displayed) {
         if (displayed == null) {
             return 0;
         }
-        boolean preferFlowing = recipe.neighborOffset().getY() == 0;
+        boolean preferFlowing = prefersFlow(recipe, recipe.neighborOffset());
         Object ingredient = displayed.getIngredient();
         List<Placement> neighbors = recipe.neighbors();
         int match = 0;
@@ -139,37 +146,39 @@ public final class SceneArrangement {
                 .trySetValue(FlowingFluid.FALLING, false));
     }
 
-    /** The placement to draw where no flow shows: a fluid in its still form, everything else as probed. */
-    private static Placement stillForm(Placement placement) {
-        if (!placement.isFlowing()) {
-            return placement;
-        }
-        return Placement.ofFluid(FluidInteractionRecipe.stillForm(placement.effectiveFluid()).defaultFluidState());
-    }
-
-    /** The state to draw at the source position: flowing when the interaction matched a flowing source. */
+    /** The state to draw at the source position: flowing when the recipe matched that form and the scene prefers it. */
     private static FluidState sourceForm(FluidInteractionRecipe recipe, Fluid fluid) {
-        if (recipe.matchesFlowingForm() && fluid instanceof FlowingFluid flowing) {
+        boolean flow = recipe.matchesFlowingForm() && (prefersFlow(recipe, BlockPos.ZERO) || !recipe.matchesSourceForm());
+        if (flow && fluid instanceof FlowingFluid flowing) {
             return flowing.getFlowing().defaultFluidState().trySetValue(FlowingFluid.LEVEL, DISPLAY_FLOW_LEVEL).trySetValue(FlowingFluid.FALLING, false);
         }
         return fluid.defaultFluidState();
     }
 
-    /** Places a source block of the same fluid one step further along {@code away} when the position flows. */
-    private static void feed(Map<BlockPos, Placement> scene, BlockPos pos, BlockPos away) {
+    /**
+     * Whether the scene draws the flowing form at this position when the recipe verified both forms there. It
+     * does beside the source. Above or below the source it does only where the interaction writes a result.
+     */
+    private static boolean prefersFlow(FluidInteractionRecipe recipe, BlockPos offset) {
+        return recipe.neighborOffset().getY() == 0 || recipe.results().containsKey(offset);
+    }
+
+    /** Places a source block of the same fluid one step along {@code away} when the position flows. */
+    private static boolean feed(Map<BlockPos, Placement> scene, BlockPos pos, BlockPos away) {
         Placement placement = scene.get(pos);
         if (placement == null) {
-            return;
+            return false;
         }
         FluidState fluid = placement.effectiveFluid();
         if (fluid.isEmpty() || fluid.isSource()) {
-            return;
+            return false;
         }
         BlockPos feedPos = pos.offset(away);
         if (scene.containsKey(feedPos)) {
-            return;
+            return false;
         }
         scene.put(feedPos, Placement.ofFluid(FluidInteractionRecipe.stillForm(fluid).defaultFluidState()));
+        return true;
     }
 
     private static Fluid still(Fluid fluid) {

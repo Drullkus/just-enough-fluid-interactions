@@ -24,6 +24,13 @@
   "jei.justenoughfluidinteractions.fluid_interactions.offset.south": "south of the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.east": "east of the source",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.west": "west of the source",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.northeast": "northeast of the source",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.northwest": "northwest of the source",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.southeast": "southeast of the source",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.southwest": "southwest of the source",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.upper": "above-%s",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.lower": "below-%s",
+  "jei.justenoughfluidinteractions.fluid_interactions.offset.blocks": "%s blocks %s",
   "jei.justenoughfluidinteractions.fluid_interactions.offset.at": "at offset (%s, %s, %s)",
   "jei.justenoughfluidinteractions.fluid_interactions.unable_from": "Unable to process for %s (from %s)"
 }

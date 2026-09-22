@@ -25,6 +25,8 @@ import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.probe.RecipeIds;
 import us.drullk.jefi.jei.probe.RuleProber;
+import us.drullk.jefi.jei.scene.SceneArrangement;
+import us.drullk.jefi.jei.scene.SceneVariant;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -479,8 +481,9 @@ public final class JeiAutoTest {
         for (Map.Entry<ResourceLocation, Boolean> hardening : Map.of(SUGAR_INFUSED_STONE, false, SUGAR_INFUSED_COBBLESTONE, true).entrySet()) {
             FluidInteractionRecipe above = hardened(matches, RuleProber.ABOVE_OFFSET, hardening.getKey(), hardening.getValue());
             FluidInteractionRecipe beside = hardened(matches, FluidInteractionRecipe.NEIGHBOR_OFFSET, hardening.getKey(), hardening.getValue());
-            if (above != null && SUGAR_INFUSED_STONE.equals(hardening.getKey())) {
+            if (above != null && SUGAR_INFUSED_COBBLESTONE.equals(hardening.getKey())) {
                 neighborRecipe = above;
+                checkVerticalFlow(above);
             }
             if (above != null) {
                 checkBothForms(above, Fluids.LAVA::isSame, "minecraft:lava");
@@ -509,6 +512,83 @@ public final class JeiAutoTest {
             return null;
         }
         return found.getFirst();
+    }
+
+    /**
+     * The scene of the cobblestone recipe draws its flowing sugar water fed from the south. Lava above it draws
+     * as the probe verified each alternative: a still block alone, or a flow fed from the west, because the
+     * south is taken. The stone recipe draws a lava source over flowing water fed from the south, although both
+     * lava forms spread into the water. Vanilla draws the flowing texture only beside a higher fluid of the
+     * same kind.
+     */
+    private static void checkVerticalFlow(FluidInteractionRecipe recipe) {
+        int still = alternative(recipe, Fluids.LAVA, false);
+        int flowing = alternative(recipe, Fluids.LAVA, true);
+        if (still < 0 || flowing < 0) {
+            LOGGER.error("Smoke test found no lava alternative pair in {} for the vertical flow check", recipe.id());
+            return;
+        }
+        String type = String.valueOf(NeoForgeRegistries.FLUID_TYPES.getKey(recipe.sourceType()));
+        List<String> offenders = new ArrayList<>();
+        Map<BlockPos, Placement> scene = SceneArrangement.of(recipe, new SceneVariant(0, still, false));
+        expectFlow(scene, BlockPos.ZERO, true, type, offenders);
+        expectFlow(scene, new BlockPos(0, 0, 1), false, type, offenders);
+        expectFlow(scene, RuleProber.ABOVE_OFFSET, false, "minecraft:lava", offenders);
+        if (scene.size() != 3) {
+            offenders.add("expected 3 placements with still lava, found " + scene.size());
+        }
+        Map<BlockPos, Placement> flow = SceneArrangement.of(recipe, new SceneVariant(0, flowing, false));
+        expectFlow(flow, RuleProber.ABOVE_OFFSET, true, "minecraft:lava", offenders);
+        expectFlow(flow, RuleProber.ABOVE_OFFSET.offset(-1, 0, 0), false, "minecraft:lava", offenders);
+        if (flow.size() != 4) {
+            offenders.add("expected 4 placements with flowing lava, found " + flow.size());
+        }
+        Map<BlockPos, Placement> stone = Map.of();
+        if (spreadRecipe != null) {
+            int water = alternative(spreadRecipe, Fluids.WATER, true);
+            stone = SceneArrangement.of(spreadRecipe, new SceneVariant(0, water, false));
+            expectFlow(stone, BlockPos.ZERO, false, "minecraft:lava", offenders);
+            expectFlow(stone, RuleProber.BELOW_OFFSET, true, "minecraft:water", offenders);
+            expectFlow(stone, RuleProber.BELOW_OFFSET.offset(0, 0, 1), false, "minecraft:water", offenders);
+            if (stone.size() != 3) {
+                offenders.add("expected 3 placements in the stone scene, found " + stone.size());
+            }
+        }
+        if (offenders.isEmpty()) {
+            LOGGER.info("Smoke test vertical flow {} (from {}): still lava {}, flowing lava {}, stone {}", recipe.id(), recipe.owner(),
+                    describeScene(scene), describeScene(flow), describeScene(stone));
+        } else {
+            LOGGER.error("Smoke test vertical flow {} drew a wrong scene: {}", recipe.id(), offenders);
+        }
+    }
+
+    /** The index of the neighbor alternative that is this fluid in this form, or -1. */
+    private static int alternative(FluidInteractionRecipe recipe, Fluid fluid, boolean flowing) {
+        List<Placement> neighbors = recipe.neighbors();
+        for (int i = 0; i < neighbors.size(); i++) {
+            Placement neighbor = neighbors.get(i);
+            if (neighbor.isFluid() && neighbor.isFlowing() == flowing && fluid.isSame(FluidInteractionRecipe.stillForm(neighbor.effectiveFluid()))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static List<String> describeScene(Map<BlockPos, Placement> scene) {
+        return scene.entrySet().stream().map(e -> Texts.offset(e.getKey()).getString() + " " + e.getValue().describe().getString()).toList();
+    }
+
+    private static void expectFlow(Map<BlockPos, Placement> scene, BlockPos offset, boolean flowing, String type, List<String> offenders) {
+        Placement placement = scene.get(offset);
+        String at = Texts.offset(offset).getString();
+        if (placement == null || !placement.isFluid()) {
+            offenders.add("no fluid " + at);
+            return;
+        }
+        String found = String.valueOf(NeoForgeRegistries.FLUID_TYPES.getKey(placement.effectiveFluid().getFluidType()));
+        if (placement.isFlowing() != flowing || !type.equals(found)) {
+            offenders.add((flowing ? "expected flowing " : "expected still ") + type + " " + at + ", found " + placement.describe().getString());
+        }
     }
 
     /** Both forms of at least one matching fluid have to cycle in the neighbor slot the probe verified. */

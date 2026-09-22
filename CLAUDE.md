@@ -203,9 +203,11 @@ Development-only classes bound to the mod for runs, never packaged.
 - JEI slots accept only still fluids. Map flowing states with `FluidInteractionRecipe.stillForm`.
   - Neighbor placements carry the form the probe verified (`Placement.isFlowing`, "Flowing
     <fluid>").
-  - A recipe with both forms of one fluid draws the flowing one beside the source
-    (`SceneArrangement.neighborIndex`).
-  - A neighbor above or below is drawn as two still blocks. Nothing flows upward.
+  - A fluid verified in its flowing form is drawn flowing, with a still source beside it, because a
+    flow costs no source block (`SceneArrangement`).
+  - In a vertical pair, the block the interaction changes keeps that preference. The block that only
+    triggers it is drawn still whenever its still form was verified. A vertical flow is fed from the
+    south. When both blocks flow, the neighbor is fed from the west. Nothing flows upward.
 - JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
 - JEI lists bookmarked recipes first. Not a bug, and no API hook to opt out.
 
@@ -419,6 +421,9 @@ One each unless stated.
 - `indicator`: the "!" on the dev fluid's source slot.
 - `neighbor recipe` per sugar water recipe, found by result, source form and offset, never by
   variant number or alternative count.
+- `vertical flow`: the cobblestone neighbor recipe draws flowing sugar water fed from the south,
+  still lava above it, and its flowing lava alternative fed from the west. The stone recipe draws a
+  lava source over flowing water fed from the south.
 - Two `neighbor pre-empted`: sugar water absent from the stone and tar spread recipes.
 - Two `neighbor registry pre-empted`: lava absent beside, present above, differing by lava's
   two forms.
@@ -437,8 +442,8 @@ One each unless stated.
 
 ### Screenshots
 
-- `jei_fluid_interactions_spread.png`: lava over water, then over stone.
-- `_form.png`, `_neighbor.png`.
+- `jei_fluid_interactions_spread.png`: a lava source over flowing water, then over stone.
+- `_form.png`. `_neighbor.png`: flowing sugar water fed from the south, a lava source above it.
 - `_cascade.png`: two output slots.
 - `_preempted.png`: the source slot over the wrapped observation text.
 - `_offset.png`: a grid-aligned water cube around the offset dripstone.
