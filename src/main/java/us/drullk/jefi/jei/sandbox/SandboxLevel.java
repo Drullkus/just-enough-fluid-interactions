@@ -28,6 +28,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.util.AbortableIterationConsumer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.level.entity.LevelEntityGetter;
 import net.minecraft.world.level.block.Block;
@@ -94,6 +96,13 @@ public final class SandboxLevel extends VirtualLevel {
     private final NeighborUpdater updater = new CollectingNeighborUpdater(this, MAX_CHAINED_NEIGHBOR_UPDATES);
     private final SandboxTicks<Fluid> fluidTicks = new SandboxTicks<>();
     private final SandboxTicks<Block> blockTicks = new SandboxTicks<>();
+    /**
+     * No block drops. A block a fluid destroys drops an item entity, which this level denies. The entity costs
+     * more to build than the block did, and a level with no entities never shows it.
+     */
+    private final GameRules gameRules = noDrops();
+    /** The entity spawns this level denied, per entity type. */
+    private final Map<EntityType<?>, Integer> deniedSpawns = new HashMap<>();
     /** A bit of {@link #watchedReads()}: the block state of the watched position was read. */
     public static final int READ_BLOCK = 1;
     /** A bit of {@link #watchedReads()}: the fluid state of the watched position was read. */
@@ -461,11 +470,28 @@ public final class SandboxLevel extends VirtualLevel {
         scheduleTick(pos, fluid, delay, TickPriority.NORMAL);
     }
 
-    /** There is no entity system here, so drops from a block a fluid destroys go nowhere. */
+    /** There is no entity system here. The level counts every spawn it denies, per entity type. */
     @Override
     public boolean addFreshEntity(Entity entity) {
-        LOGGER.debug("Denied attempted entity spawn {}", entity.getType());
+        deniedSpawns.merge(entity.getType(), 1, Integer::sum);
         return false;
+    }
+
+    /** The entity spawns this level denied since it was made, per entity type. */
+    public Map<EntityType<?>, Integer> deniedSpawns() {
+        return Collections.unmodifiableMap(deniedSpawns);
+    }
+
+    @Override
+    public GameRules getGameRules() {
+        return gameRules;
+    }
+
+    private static GameRules noDrops() {
+        GameRules rules = new GameRules();
+        rules.getRule(GameRules.RULE_DOBLOCKDROPS).set(false, null);
+        rules.getRule(GameRules.RULE_DOENTITYDROPS).set(false, null);
+        return rules;
     }
 
     /**

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,6 +27,7 @@ import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
@@ -99,6 +101,7 @@ public final class InteractionProber {
         LOGGER.debug("Settled {} arrangement(s) in {} ms; {} block scheduled tick(s) were asked for, which only a server level can run",
                 sum(worker -> worker.settler.settledCount()), sum(worker -> worker.settler.millis()),
                 sum(worker -> worker.level.blockTicksRequested()));
+        LOGGER.debug("Denied {} entity spawn(s): {}", deniedSpawns().values().stream().mapToInt(Integer::intValue).sum(), deniedSpawns());
 
         Set<Object> known = new HashSet<>();
         registry.recipes().values().forEach(recipes -> recipes.forEach(recipe -> known.add(arrangementKey(recipe))));
@@ -300,6 +303,15 @@ public final class InteractionProber {
 
     private long sum(ToLongFunction<Worker> counter) {
         return workers.stream().mapToLong(counter).sum();
+    }
+
+    /** The entity spawns every sandbox denied, per entity type, keyed by the type's registry id. */
+    private Map<String, Integer> deniedSpawns() {
+        Map<String, Integer> denied = new TreeMap<>();
+        for (Worker worker : workers) {
+            worker.level.deniedSpawns().forEach((type, count) -> denied.merge(EntityType.getKey(type).toString(), count, Integer::sum));
+        }
+        return denied;
     }
 
     private void counters(String tier) {
