@@ -8,8 +8,13 @@ import java.util.Map;
 import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.core.registries.BuiltInRegistries;
+import org.slf4j.Logger;
+
+import com.mojang.logging.LogUtils;
+
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.LiquidBlockContainer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.material.Fluid;
@@ -25,11 +30,15 @@ import net.neoforged.neoforge.fluids.FluidType;
  * positions.
  */
 final class Candidates {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     /** Every fluid in still form, then in a full flowing form when it has one. */
     final List<Placement> fluids;
     private final Map<FluidType, List<Placement>> fluidsByType = new HashMap<>();
     /** The default state of every block that holds no fluid. */
     final List<Placement> blocks;
+    /** The blocks vanilla's gate lets a fluid into, which is what {@code FlowingFluid.canSpreadTo} asks. */
+    final List<Placement> reachableBlocks;
     /** The still form of every fluid, then the blocks. The multi-position search of the registry tier tries these. */
     final List<Placement> stillFluidsAndBlocks;
     /** The states a tier probes as the source, per type: each still fluid with a block, then its full flowing form. */
@@ -69,7 +78,15 @@ final class Candidates {
             fluidsByType.computeIfAbsent(placement.effectiveFluid().getFluidType(), key -> new ArrayList<>()).add(placement);
         }
         this.blocks = List.copyOf(blocks);
+        this.reachableBlocks = this.blocks.stream().filter(Candidates::canHoldFluid).toList();
         this.stillFluidsAndBlocks = List.copyOf(search);
+        LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
+                this.fluids.size(), reachableBlocks.size(), this.blocks.size());
+    }
+
+    private static boolean canHoldFluid(Placement placement) {
+        BlockState state = placement.block();
+        return state.getBlock() instanceof LiquidBlockContainer || !state.blocksMotion();
     }
 
     /** Both forms of every fluid of one type, in the order of {@link #fluids}. Empty for a type without a block. */

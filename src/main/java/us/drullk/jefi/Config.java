@@ -18,11 +18,22 @@ public final class Config {
             .define("hideUnprocessable", true);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> IGNORED_MODS = BUILDER
-            .comment("Fluid interaction recipes owned by these mod ids are hidden.")
+            .comment("The probe hides the recipes of the interactions from these mod ids.")
             .defineListAllowEmpty("ignoredMods", List.of(), () -> "", Config::isPlausibleModId);
 
+    public static final ModConfigSpec.IntValue PROBE_THREADS = BUILDER
+            .comment("The number of threads that probe the fluid interactions when JEI starts.",
+                    "Value 0 uses all processors but one, up to 8. The value 1 uses one thread.",
+                    "Use 1 if the fluid code of a mod is not safe on another thread.")
+            .defineInRange("probeThreads", 0, 0, 16);
+
+    public static final ModConfigSpec.IntValue PROBE_STALL_SECONDS = BUILDER
+            .comment("The maximum time in seconds for one fluid type per parallel process.",
+                    "If one fluid type takes more time, the probe stops the threads and continues on one thread.")
+            .defineInRange("probeStallSeconds", 30, 5, 600);
+
     public static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_PROBE = BUILDER
-            .comment("Fluid ids to probe in every tier although their classes declare no code of their own.")
+            .comment("The probe probes these fluid ids in every tier, also when their classes declare no code of their own.")
             .defineListAllowEmpty("forceProbe", List.of(), () -> "", Config::isPlausibleFluidId);
 
     public static final ModConfigSpec SPEC = BUILDER.build();

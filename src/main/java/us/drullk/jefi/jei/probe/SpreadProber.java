@@ -85,13 +85,10 @@ public final class SpreadProber extends RuleProber {
 
     public SpreadProber(SandboxLevel level, Settler settler, Candidates candidates) {
         super(LOGGER, level, settler, candidates.fluids, "fluid spread", "the fluid spread of", "spread/");
-        List<Placement> reachableBlocks = candidates.blocks.stream().filter(SpreadProber::canHoldFluid).toList();
-        this.reachableCandidates = concat(candidates.fluids, reachableBlocks);
+        this.reachableCandidates = concat(candidates.fluids, candidates.reachableBlocks);
         this.allCandidates = concat(candidates.fluids, candidates.blocks);
         this.destroyCandidates = concat(candidates.fluids,
-                reachableBlocks.stream().filter(placement -> !(placement.block().getBlock() instanceof LiquidBlockContainer)).toList());
-        LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
-                candidates.fluids.size(), reachableBlocks.size(), candidates.blocks.size());
+                candidates.reachableBlocks.stream().filter(placement -> !(placement.block().getBlock() instanceof LiquidBlockContainer)).toList());
     }
 
     @Override
@@ -201,12 +198,6 @@ public final class SpreadProber extends RuleProber {
     private static boolean isBaseFluid(Class<?> type) {
         String name = type.getName();
         return BASE_FLUIDS.contains(name) || name.startsWith(NEOFORGE_BASE_FLUID);
-    }
-
-    /** Whether vanilla's gate lets a fluid into this state, which is what {@code FlowingFluid.canSpreadTo} asks. */
-    private static boolean canHoldFluid(Placement placement) {
-        BlockState state = placement.block();
-        return state.getBlock() instanceof LiquidBlockContainer || !state.blocksMotion();
     }
 
     private static List<Placement> concat(List<Placement> fluids, List<Placement> blocks) {
