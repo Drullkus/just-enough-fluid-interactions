@@ -66,8 +66,9 @@ public abstract class RuleProber {
     private final Map<Class<?>, Set<String>> declaredMethods = new HashMap<>();
     /** The settled result of every arrangement of the type in progress. The inert check reads it. */
     private final Map<Arrangement, Map<BlockPos, BlockState>> settled = new HashMap<>();
-    /** What the hook runs of the type in progress read at each target, per source form. */
-    private final Map<Target, RunMemo<Map<BlockPos, BlockState>>> memos = new HashMap<>();
+    /** The sweeps of the type in progress, one per source form and target. */
+    private final Map<Target, Sweep> sweeps = new HashMap<>();
+    private static final Placement NOTHING = Placement.ofBlock(AIR);
     private final Comparator<Map.Entry<Outcome, Group>> withinOwner = Comparator
             .<Map.Entry<Outcome, Group>>comparingInt(entry -> targets().indexOf(entry.getKey().target()))
             .thenComparing(entry -> primaryResultKey(entry.getKey()), Comparator.nullsLast(RecipeIds.LOCATION_ORDER))
@@ -179,14 +180,26 @@ public abstract class RuleProber {
         int runsBefore = runs;
         int droppedBefore = dropped;
         settled.clear();
-        memos.clear();
+        sweeps.clear();
 
         Map<Outcome, Group> outcomes = new LinkedHashMap<>();
         for (BlockPos target : targets()) {
             for (FluidState source : probed) {
                 String owner = owner(source);
-                for (Placement candidate : candidates(source, probed)) {
-                    Map<BlockPos, BlockState> results = settled(source, target, candidate);
+                Sweep sweep = sweep(source, target);
+                List<Placement> candidates = candidates(source, probed);
+                for (int i = 0; i < candidates.size(); i++) {
+                    Placement candidate = candidates.get(i);
+                    Map<BlockPos, BlockState> wrote = run(sweep, candidate);
+                    if (wrote.isEmpty()) {
+                        if (sweep.answersRest()) {
+                            skippedRuns += candidates.size() - i - 1;
+                            break;
+                        }
+                        continue;
+                    }
+                    Map<BlockPos, BlockState> results = settled.computeIfAbsent(new Arrangement(source, target, candidate),
+                            key -> settle(source, target, candidate, wrote));
                     if (!results.isEmpty()) {
                         Group group = outcomes.computeIfAbsent(new Outcome(owner, target, results), k -> new Group());
                         group.sources.add(source);
@@ -272,7 +285,14 @@ public abstract class RuleProber {
 
     /** What a level leaves behind at one arrangement, settled once per type and read from then on. */
     private Map<BlockPos, BlockState> settled(FluidState source, BlockPos target, Placement candidate) {
-        return settled.computeIfAbsent(new Arrangement(source, target, candidate), key -> settle(source, target, candidate));
+        return settled.computeIfAbsent(new Arrangement(source, target, candidate), key -> {
+            Map<BlockPos, BlockState> wrote = run(sweep(source, target), candidate);
+            return wrote.isEmpty() ? Map.of() : settle(source, target, candidate, wrote);
+        });
+    }
+
+    private Sweep sweep(FluidState source, BlockPos target) {
+        return sweeps.computeIfAbsent(new Target(source, target), key -> new Sweep(source, target));
     }
 
     /**
@@ -282,11 +302,7 @@ public abstract class RuleProber {
      * something different where the hook wrote. That arrangement belongs to a different rule, so the answer for
      * it is empty.
      */
-    private Map<BlockPos, BlockState> settle(FluidState source, BlockPos target, Placement candidate) {
-        Map<BlockPos, BlockState> wrote = run(source, target, candidate);
-        if (wrote.isEmpty()) {
-            return Map.of();
-        }
+    private Map<BlockPos, BlockState> settle(FluidState source, BlockPos target, Placement candidate, Map<BlockPos, BlockState> wrote) {
         Settler.Outcome outcome = settler.settle(content(source, target, candidate), target, wrote);
         if (outcome.preempted() != null) {
             dropped++;
@@ -319,74 +335,107 @@ public abstract class RuleProber {
      * inherited, and inherited code writes only the fluid's own states. So that form changes nothing at any
      * arrangement, and it is inert without a run.
      */
-    private Map<BlockPos, BlockState> run(FluidState source, BlockPos target, Placement candidate) {
-        if (!forced(FluidInteractionRecipe.stillForm(source)) && !declaresHook(source)) {
+    private Map<BlockPos, BlockState> run(Sweep sweep, Placement candidate) {
+        if (!sweep.runs) {
             return Map.of();
         }
-        Map<BlockPos, Placement> scene = scene(source, target, candidate);
-        RunMemo<Map<BlockPos, BlockState>> memo = readsTargetThroughLevel(source)
-                ? memos.computeIfAbsent(new Target(source, target), key -> new RunMemo<>()) : null;
-        Map<BlockPos, BlockState> writes = memo != null ? memo.lookup(candidate) : null;
+        Map<BlockPos, BlockState> writes = sweep.memo != null ? sweep.memo.lookup(candidate) : null;
         if (writes != null) {
             skippedRuns++;
         } else {
-            writes = callHook(source, target, candidate, scene);
+            writes = callHook(sweep, candidate);
             if (writes == null) {
                 return Map.of();
             }
-            if (memo != null) {
-                memo.record(candidate, level.watchedReads(), writes);
+            if (sweep.memo != null) {
+                sweep.memo.record(candidate, level.watchedReads(), writes);
             }
         }
-        Set<Fluid> own = ownFluids(source, candidate);
-        Map<BlockPos, BlockState> results = new LinkedHashMap<>();
-        writes.forEach((pos, written) -> {
-            Placement placed = scene.get(pos);
-            if (transformed(placed != null ? placed.block() : AIR, written, own)) {
-                results.put(pos.subtract(SandboxLevel.ORIGIN), written);
+        if (writes.isEmpty()) {
+            return Map.of();
+        }
+        return filter(writes, sweep, candidate, ownFluids(sweep.source, candidate));
+    }
+
+    /** The writes that change a position. The keys are offsets from the source. */
+    private static Map<BlockPos, BlockState> filter(Map<BlockPos, BlockState> writes, Sweep sweep,
+                                                    @Nullable Placement candidate, Set<Fluid> own) {
+        Map<BlockPos, BlockState> results = null;
+        for (var entry : writes.entrySet()) {
+            Placement placed = candidate != null && entry.getKey().equals(sweep.targetPos) ? candidate : sweep.fixed.get(entry.getKey());
+            if (transformed(placed != null ? placed.block() : AIR, entry.getValue(), own)) {
+                if (results == null) {
+                    results = new LinkedHashMap<>();
+                }
+                results.put(entry.getKey().subtract(SandboxLevel.ORIGIN), entry.getValue());
             }
-        });
-        return results;
+        }
+        return results != null ? results : Map.of();
     }
 
     /** Places the scene, calls the hook with the target watched, and returns every write. Null when the hook threw. */
-    private @Nullable Map<BlockPos, BlockState> callHook(FluidState source, BlockPos target, Placement candidate,
-                                                         Map<BlockPos, Placement> scene) {
+    private @Nullable Map<BlockPos, BlockState> callHook(Sweep sweep, Placement candidate) {
         runs++;
         level.reset();
-        scene.forEach(level::place);
+        sweep.fixed.forEach(level::place);
+        level.place(sweep.targetPos, candidate);
         level.beginTracking();
-        level.watch(SandboxLevel.ORIGIN.offset(target));
+        level.watch(sweep.targetPos);
         try {
-            callHook(level, source, target, candidate);
+            callHook(level, sweep.source, sweep.target, candidate);
         } catch (RuntimeException | LinkageError e) {
-            logger.debug("{} with {} threw while probing {}", source.getFluidType().getDescriptionId(),
+            logger.debug("{} with {} threw while probing {}", sweep.source.getFluidType().getDescriptionId(),
                     candidate.describe().getString(), tier, e);
             return null;
         } finally {
             level.endTracking();
         }
-        return level.writes();
+        return level.wroteNothing() ? Map.of() : level.writes();
     }
 
     /**
-     * The sandbox scene of one arrangement. The source sits at the origin. A still source sits above it when it
-     * flows. Bedrock sits below it, unless the target is below. The candidate sits at the target.
+     * The runs of one source form at one target. All candidates of the sweep use one scene. The source is at
+     * the origin. A flowing source has a still source above it. Bedrock is below the source. If the target is
+     * below the source, the candidate is there and not the bedrock. The sweep also keeps what the hook reads at
+     * the target. Then one run can give the answer for a later candidate.
      */
-    private static Map<BlockPos, Placement> scene(FluidState source, BlockPos target, Placement candidate) {
-        Map<BlockPos, Placement> scene = new LinkedHashMap<>();
-        scene.put(SandboxLevel.ORIGIN, Placement.ofFluid(source));
-        if (!source.isSource()) {
-            FluidState feed = FluidInteractionRecipe.stillForm(source).defaultFluidState();
-            if (feed.isSource()) {
-                scene.put(SandboxLevel.ORIGIN.offset(ABOVE_OFFSET), Placement.ofFluid(feed));
+    private final class Sweep {
+        final FluidState source;
+        final BlockPos target;
+        final BlockPos targetPos;
+        /** True when the config forces this source form or when its own classes declare the hook. */
+        final boolean runs;
+        final Map<BlockPos, Placement> fixed = new LinkedHashMap<>();
+        final @Nullable RunMemo<Map<BlockPos, BlockState>> memo;
+
+        Sweep(FluidState source, BlockPos target) {
+            this.source = source;
+            this.target = target;
+            this.targetPos = SandboxLevel.ORIGIN.offset(target);
+            this.runs = forced(FluidInteractionRecipe.stillForm(source)) || declaresHook(source);
+            this.memo = readsTargetThroughLevel(source) ? new RunMemo<>() : null;
+            fixed.put(SandboxLevel.ORIGIN, Placement.ofFluid(source));
+            if (!source.isSource()) {
+                FluidState feed = FluidInteractionRecipe.stillForm(source).defaultFluidState();
+                if (feed.isSource()) {
+                    fixed.put(SandboxLevel.ORIGIN.offset(ABOVE_OFFSET), Placement.ofFluid(feed));
+                }
+            }
+            if (!target.equals(BELOW_OFFSET)) {
+                fixed.put(SandboxLevel.ORIGIN.offset(BELOW_OFFSET), Placement.ofBlock(FLOOR));
             }
         }
-        if (!target.equals(BELOW_OFFSET)) {
-            scene.put(SandboxLevel.ORIGIN.offset(BELOW_OFFSET), Placement.ofBlock(FLOOR));
+
+        /**
+         * Tells whether one earlier run gives the answer "nothing" for all candidates that are still to come. A
+         * run that does not read the target gives the same writes for all candidates. If those writes change
+         * nothing with an empty target, they change nothing with a candidate at the target. A candidate can only
+         * make a write equal to what is there.
+         */
+        boolean answersRest() {
+            Map<BlockPos, BlockState> shared = memo != null ? memo.unread() : null;
+            return shared != null && filter(shared, this, null, ownFluids(source, NOTHING)).isEmpty();
         }
-        scene.put(SandboxLevel.ORIGIN.offset(target), candidate);
-        return scene;
     }
 
     private static boolean transformed(BlockState placed, BlockState written, Set<Fluid> own) {

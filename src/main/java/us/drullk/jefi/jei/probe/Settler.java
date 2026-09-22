@@ -62,6 +62,9 @@ public final class Settler {
     /** A ceiling on the cost of one arrangement: a fluid that pours off the bedrock reschedules itself without end. */
     private static final int MAX_TICK_RUNS = 20_000;
 
+    /** Experiment knob: how far past the arrangement a fluid can pour sideways and up. Negative: no walls. */
+    private static final int MARGIN = Integer.getInteger("jefi.settleMargin", -1);
+
     /** Orders results so that two arrangements with the same results produce the same recipe. */
     private static final Comparator<BlockPos> OFFSET_ORDER = Comparator
             .<BlockPos>comparingInt(BlockPos::getY)
@@ -145,6 +148,15 @@ public final class Settler {
         int lowest = Stream.concat(placed.keySet().stream(), wrote.stream()).mapToInt(BlockPos::getY).min().orElse(0);
         level.reset();
         level.floor(SandboxLevel.ORIGIN.getY() + lowest);
+        if (MARGIN >= 0) {
+            List<BlockPos> box = Stream.concat(placed.keySet().stream(), wrote.stream()).toList();
+            BlockPos min = new BlockPos(box.stream().mapToInt(BlockPos::getX).min().orElse(0) - MARGIN, 0,
+                    box.stream().mapToInt(BlockPos::getZ).min().orElse(0) - MARGIN);
+            BlockPos max = new BlockPos(box.stream().mapToInt(BlockPos::getX).max().orElse(0) + MARGIN,
+                    box.stream().mapToInt(BlockPos::getY).max().orElse(0) + MARGIN,
+                    box.stream().mapToInt(BlockPos::getZ).max().orElse(0) + MARGIN);
+            level.walls(SandboxLevel.ORIGIN.offset(min), SandboxLevel.ORIGIN.offset(max));
+        }
         level.setLive(true);
         try {
             fixtures.forEach((offset, placement) -> level.placeLive(SandboxLevel.ORIGIN.offset(offset), placement));

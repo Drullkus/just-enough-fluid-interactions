@@ -100,6 +100,8 @@ public final class SandboxLevel extends VirtualLevel {
     public static final int READ_FLUID = 2;
 
     private int writesSinceReset;
+    /** The horizontal and upper walls of a settle. A write outside them fails, as a write below the floor does. */
+    private int wallMinX = Integer.MIN_VALUE, wallMinZ = Integer.MIN_VALUE, wallMaxX = Integer.MAX_VALUE, wallMaxZ = Integer.MAX_VALUE, wallMaxY = Integer.MAX_VALUE;
     private boolean tracking;
     private boolean trackingReads;
     private boolean watching;
@@ -108,6 +110,13 @@ public final class SandboxLevel extends VirtualLevel {
     private boolean live;
     private long gameTime;
     private int blockTicksRequested;
+    private long liveWrites;
+    private long liveNeighborUpdates;
+    private long liveTicks;
+
+    public long liveWrites() { return liveWrites; }
+    public long liveNeighborUpdates() { return liveNeighborUpdates; }
+    public long liveTicks() { return liveTicks; }
 
     public SandboxLevel(RegistryAccess access) {
         super(access, false);
@@ -124,6 +133,11 @@ public final class SandboxLevel extends VirtualLevel {
      */
     public void reset() {
         setBounds(DEFAULT_BOUNDS);
+        wallMinX = Integer.MIN_VALUE;
+        wallMinZ = Integer.MIN_VALUE;
+        wallMaxX = Integer.MAX_VALUE;
+        wallMaxZ = Integer.MAX_VALUE;
+        wallMaxY = Integer.MAX_VALUE;
         boolean grown = writesSinceReset > SMALL_RUN;
         blocks.clear();
         fluids.clear();
@@ -154,6 +168,19 @@ public final class SandboxLevel extends VirtualLevel {
      */
     public void floor(int y) {
         setBounds(new AABB(DEFAULT_BOUNDS.minX, y, DEFAULT_BOUNDS.minZ, DEFAULT_BOUNDS.maxX, DEFAULT_BOUNDS.maxY, DEFAULT_BOUNDS.maxZ));
+    }
+
+    /** Puts walls around a settle: a write outside {@code min..max} (inclusive, x and z, and above max y) fails. */
+    public void walls(BlockPos min, BlockPos max) {
+        wallMinX = min.getX();
+        wallMinZ = min.getZ();
+        wallMaxX = max.getX();
+        wallMaxZ = max.getZ();
+        wallMaxY = max.getY();
+    }
+
+    private boolean outsideWalls(BlockPos pos) {
+        return pos.getX() < wallMinX || pos.getX() > wallMaxX || pos.getZ() < wallMinZ || pos.getZ() > wallMaxZ || pos.getY() > wallMaxY;
     }
 
     public void place(BlockPos pos, Placement placement) {
@@ -219,6 +246,7 @@ public final class SandboxLevel extends VirtualLevel {
                     break;
                 }
                 runs++;
+                liveTicks++;
                 FluidState state = getFluidState(tick.pos());
                 if (!state.is(tick.type())) {
                     continue;
@@ -288,6 +316,11 @@ public final class SandboxLevel extends VirtualLevel {
         return watchedReads;
     }
 
+    /** True when the level recorded no write since {@link #beginTracking()}. */
+    public boolean wroteNothing() {
+        return writes.isEmpty();
+    }
+
     /** Positions written through any {@code setBlock} variant, in write order, with the final state written. */
     public Map<BlockPos, BlockState> writes() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(writes));
@@ -331,7 +364,7 @@ public final class SandboxLevel extends VirtualLevel {
      */
     @Override
     public boolean setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft) {
-        if (isOutsideBuildHeight(pos)) {
+        if (isOutsideBuildHeight(pos) || outsideWalls(pos)) {
             return false;
         }
         BlockPos at = pos.immutable();
@@ -344,6 +377,7 @@ public final class SandboxLevel extends VirtualLevel {
             return false;
         }
         store(at, state);
+        liveWrites++;
         boolean moving = (flags & Block.UPDATE_MOVE_BY_PISTON) != 0;
         old.onRemove(this, at, state, moving);
         if (!blockAt(at).is(state.getBlock())) {
@@ -522,6 +556,7 @@ public final class SandboxLevel extends VirtualLevel {
     @Override
     public void updateNeighborsAt(BlockPos pos, Block block) {
         if (live) {
+            liveNeighborUpdates += 6;
             updater.updateNeighborsAtExceptFromFacing(pos, block, null);
         }
     }
@@ -529,6 +564,7 @@ public final class SandboxLevel extends VirtualLevel {
     @Override
     public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block block, Direction skipSide) {
         if (live) {
+            liveNeighborUpdates += 6;
             updater.updateNeighborsAtExceptFromFacing(pos, block, skipSide);
         }
     }
@@ -543,6 +579,7 @@ public final class SandboxLevel extends VirtualLevel {
     @Override
     public void neighborChanged(BlockState state, BlockPos pos, Block block, BlockPos fromPos, boolean isMoving) {
         if (live) {
+            liveNeighborUpdates++;
             updater.neighborChanged(state, pos, block, fromPos, isMoving);
         }
     }

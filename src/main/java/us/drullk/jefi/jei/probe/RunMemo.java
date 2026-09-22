@@ -33,6 +33,11 @@ final class RunMemo<V> {
         return byFluid.get(fluidOf(candidate));
     }
 
+    /** The answer of a run that does not read the target. All candidates share it. Null when there is no such run. */
+    @Nullable V unread() {
+        return unread;
+    }
+
     /** Records the answer of a run and what the run read at the target. */
     void record(Placement candidate, int reads, V answer) {
         if (reads == 0) {

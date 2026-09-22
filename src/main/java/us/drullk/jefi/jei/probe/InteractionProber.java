@@ -59,8 +59,14 @@ public final class InteractionProber {
         List<FluidType> types = probable(orderedTypes(registered.keySet()), registered);
 
         Tier registry = registryTier(types, registered);
+        LOGGER.debug("After registry: settled {} in {} ms, live writes {}, neighbor updates {}, fluid ticks {}",
+                settler.settledCount(), settler.millis(), level.liveWrites(), level.liveNeighborUpdates(), level.liveTicks());
         Tier spread = ruleTier(types, new SpreadProber(level, settler, candidates), "fluid spread", "that inherit all of their spread code");
+        LOGGER.debug("After spread: settled {} in {} ms, live writes {}, neighbor updates {}, fluid ticks {}",
+                settler.settledCount(), settler.millis(), level.liveWrites(), level.liveNeighborUpdates(), level.liveTicks());
         Tier neighbors = ruleTier(types, new NeighborProber(level, settler, candidates), "fluid neighbors", "whose blocks inherit all of their update code");
+        LOGGER.debug("After neighbors: settled {} in {} ms, live writes {}, neighbor updates {}, fluid ticks {}",
+                settler.settledCount(), settler.millis(), level.liveWrites(), level.liveNeighborUpdates(), level.liveTicks());
         LOGGER.debug("Settled {} arrangement(s) in {} ms; {} block scheduled tick(s) were asked for, which only a server level can run",
                 settler.settledCount(), settler.millis(), level.blockTicksRequested());
 
