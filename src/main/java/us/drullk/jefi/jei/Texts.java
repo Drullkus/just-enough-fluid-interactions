@@ -68,7 +68,7 @@ public final class Texts {
     }
 
     /**
-     * Describes a position relative to the source fluid in words: "below-the source", "above-west of the
+     * Describes a position relative to the source fluid in words: "below the source", "above-west of the
      * source", "2 blocks north of the source". Only a position off every axis and outside the cube around
      * the source falls back to its coordinates.
      */
