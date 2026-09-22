@@ -85,7 +85,7 @@ final class RegistryProber {
 
     private ProbedInteraction probe(FluidType type, int index, InteractionInformation interaction) {
         Probe probe = new Probe(type, index, InteractionOwners.of(type, interaction));
-        List<FluidState> sourceStates = Candidates.sourceStates(type);
+        List<FluidState> sourceStates = candidates.sourceStates(type);
         if (sourceStates.isEmpty()) {
             LOGGER.debug("Fluid interaction {} has no source fluid state to probe", probe);
             return probe.failed(Texts.unable(type, probe.owner));

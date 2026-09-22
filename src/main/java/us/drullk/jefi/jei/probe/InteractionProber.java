@@ -117,11 +117,11 @@ public final class InteractionProber {
         return new Tier(found, count, System.nanoTime() - start);
     }
 
-    private static Tier ruleTier(List<FluidType> types, RuleProber prober, String tier, String inherit) {
+    private Tier ruleTier(List<FluidType> types, RuleProber prober, String tier, String inherit) {
         long start = System.nanoTime();
         Map<FluidType, List<FluidInteractionRecipe>> found = new LinkedHashMap<>();
         for (FluidType type : types) {
-            List<FluidInteractionRecipe> recipes = prober.probe(type, Candidates.sourceStates(type));
+            List<FluidInteractionRecipe> recipes = prober.probe(type, candidates.sourceStates(type));
             if (!recipes.isEmpty()) {
                 found.put(type, recipes);
             }

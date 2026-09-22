@@ -32,6 +32,8 @@ final class Candidates {
     final List<Placement> blocks;
     /** The still form of every fluid, then the blocks. The multi-position search of the registry tier tries these. */
     final List<Placement> stillFluidsAndBlocks;
+    /** The states a tier probes as the source, per type: each still fluid with a block, then its full flowing form. */
+    private final Map<FluidType, List<FluidState>> sourcesByType = new HashMap<>();
 
     Candidates() {
         List<Placement> fluids = new ArrayList<>();
@@ -44,9 +46,12 @@ final class Candidates {
             Placement source = Placement.ofFluid(still);
             stillFluids.add(source);
             fluids.add(source);
+            List<FluidState> sources = sourcesByType.computeIfAbsent(fluid.getFluidType(), key -> new ArrayList<>());
+            sources.add(still);
             FluidState flow = flowingForm(fluid);
             if (flow != null) {
                 fluids.add(Placement.ofFluid(flow));
+                sources.add(flow);
             }
         }
         List<Placement> blocks = new ArrayList<>();
@@ -74,25 +79,10 @@ final class Candidates {
 
     /**
      * The states of one type a tier probes as the source. The list holds each still fluid with a block. It also
-     * holds the full flowing form of that fluid when it has one.
+     * holds the full flowing form of that fluid when it has one. Empty for a type without a block.
      */
-    static List<FluidState> sourceStates(FluidType type) {
-        List<FluidState> states = new ArrayList<>();
-        for (Fluid fluid : BuiltInRegistries.FLUID) {
-            if (fluid.getFluidType() != type || fluid == Fluids.EMPTY || !FluidBlocks.hasBlock(fluid)) {
-                continue;
-            }
-            FluidState still = fluid.defaultFluidState();
-            if (!still.isSource()) {
-                continue;
-            }
-            states.add(still);
-            FluidState flow = flowingForm(fluid);
-            if (flow != null) {
-                states.add(flow);
-            }
-        }
-        return states;
+    List<FluidState> sourceStates(FluidType type) {
+        return sourcesByType.getOrDefault(type, List.of());
     }
 
     /**

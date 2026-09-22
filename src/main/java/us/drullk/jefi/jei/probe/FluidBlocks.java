@@ -1,5 +1,8 @@
 package us.drullk.jefi.jei.probe;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
@@ -13,6 +16,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * this before it offers a fluid as a source or as a candidate.
  */
 public final class FluidBlocks {
+    /** The answer per type. The fluid registry is frozen before any probe runs, so an answer never changes. */
+    private static final Map<FluidType, Boolean> BY_TYPE = new ConcurrentHashMap<>();
 
     private FluidBlocks() {
     }
@@ -24,6 +29,10 @@ public final class FluidBlocks {
 
     /** Whether any fluid of the type has a block. Only such a block lets the type stand anywhere at all. */
     public static boolean hasBlock(FluidType type) {
+        return BY_TYPE.computeIfAbsent(type, FluidBlocks::scan);
+    }
+
+    private static boolean scan(FluidType type) {
         for (Fluid fluid : BuiltInRegistries.FLUID) {
             if (fluid != Fluids.EMPTY && fluid.getFluidType() == type && hasBlock(fluid)) {
                 return true;
