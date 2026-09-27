@@ -63,6 +63,8 @@ final class RegistryProber {
     private final Candidates candidates;
     private int skippedRuns;
     private int shortlisted;
+    /** The watchdog reads this from a different thread. */
+    private volatile int runs;
 
     RegistryProber(SandboxLevel level, Settler settler, Candidates candidates) {
         this.level = level;
@@ -146,6 +148,11 @@ final class RegistryProber {
         return shortlisted;
     }
 
+    /** Predicate runs so far. */
+    int runs() {
+        return runs;
+    }
+
     private static List<FluidInteractionRecipe> order(ResourceLocation typeKey, List<ProbedInteraction> probed) {
         Map<String, List<ProbedInteraction>> byOwner = new LinkedHashMap<>();
         for (ProbedInteraction interaction : probed) {
@@ -213,6 +220,7 @@ final class RegistryProber {
      * it read when {@code reads} is set. Only the search reads that list.
      */
     private Run run(InteractionInformation interaction, FluidState source, Map<BlockPos, Placement> requirements, boolean reads) {
+        runs++;
         level.reset();
         level.placeFluid(SandboxLevel.ORIGIN, source);
         requirements.forEach(level::place);

@@ -156,6 +156,11 @@ public final class InteractionProber {
             spread = new SpreadProber(level, settler, candidates);
             neighbors = new NeighborProber(level, settler, candidates);
         }
+
+        /** Candidate runs and settles so far, in every tier. */
+        long progress() {
+            return registry.runs() + spread.runs() + neighbors.runs() + settler.settledCount();
+        }
     }
 
     /** What one tier found, per fluid type, and how many rules it ran. */
@@ -197,17 +202,19 @@ public final class InteractionProber {
      * the order given. A tier that fails on the pool runs again on one fresh worker, because a hook of a mod can
      * be unsafe off its own thread. A hook that waits for the render thread is one case: the render thread
      * waits here, so that hook never returns, and the watchdog in {@link #parallel} reports it as a failure.
-     * Every later tier then runs on that worker too.
+     * Every later tier then runs on that worker too. The counts then hold only that worker's work.
      */
     private <T> Map<FluidType, T> phase(String tier, List<FluidType> types, BiFunction<Worker, FluidType, T> task) {
         Map<FluidType, T> results = new ConcurrentHashMap<>();
         if (threads > 1) {
+            int before = workers.size();
             try {
                 parallel(types, (worker, type) -> results.put(type, task.apply(worker, type)));
             } catch (RuntimeException | Error e) {
                 LOGGER.warn("Probing the {} on {} threads failed. The probe continues on one thread.", tier, threads, e);
                 results.clear();
                 threads = 1;
+                abandon(before);
             }
         }
         if (threads == 1) {
@@ -234,9 +241,16 @@ public final class InteractionProber {
         return serial;
     }
 
+    /** Removes the workers of a failed attempt from the counts. */
+    private void abandon(int before) {
+        while (workers.size() > before) {
+            workers.remove(workers.size() - 1);
+        }
+    }
+
     /**
      * Every thread makes its worker and takes the next type until none is left. The first failure stops all of
-     * them. A type that a thread holds for longer than the config allows is a failure too: the thread stays
+     * them. A thread without progress for longer than the config allows is a failure too: the thread stays
      * behind, a daemon with one sandbox, and the other threads take no further type.
      */
     private void parallel(List<FluidType> types, BiConsumer<Worker, FluidType> task) {
@@ -251,6 +265,7 @@ public final class InteractionProber {
                 try {
                     Worker worker = new Worker(access, candidates);
                     workers.add(worker);
+                    current.begin(worker);
                     for (int i; (i = next.getAndIncrement()) < types.size() && failure.get() == null; ) {
                         current.start(types.get(i));
                         task.accept(worker, types.get(i));
@@ -294,13 +309,19 @@ public final class InteractionProber {
         }
     }
 
-    /** The type one worker holds and since when. The watchdog reads both from a different thread. */
+    /** The type one worker holds and when its progress last changed. The watchdog reads both from a different thread. */
     private static final class Progress {
+        private volatile @Nullable Worker worker;
         private volatile @Nullable FluidType type;
+        private volatile long lastProgress;
         private volatile long since;
 
-        void start(FluidType type) {
+        void begin(Worker worker) {
+            this.worker = worker;
             this.since = System.nanoTime();
+        }
+
+        void start(FluidType type) {
             this.type = type;
         }
 
@@ -308,10 +329,21 @@ public final class InteractionProber {
             this.type = null;
         }
 
-        /** The held type's key when the worker has held it longer than {@code limit} nanoseconds, else null. */
+        /** The held type's key when the progress has not changed for {@code limit} nanoseconds, else null. */
         @Nullable String stuckFor(long limit) {
             FluidType held = type;
-            return held != null && System.nanoTime() - since > limit ? RecipeIds.keyOf(held).toString() : null;
+            Worker current = worker;
+            if (held == null || current == null) {
+                return null;
+            }
+            long progress = current.progress();
+            long now = System.nanoTime();
+            if (progress != lastProgress) {
+                lastProgress = progress;
+                since = now;
+                return null;
+            }
+            return now - since > limit ? RecipeIds.keyOf(held).toString() : null;
         }
     }
 

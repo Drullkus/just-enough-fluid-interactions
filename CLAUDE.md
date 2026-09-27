@@ -256,7 +256,8 @@ Development-only classes bound to the mod for runs, never packaged.
     zero), then shape updates. Scheduled fluid ticks go to a queue on a virtual clock.
 - What the sandbox does not do.
   - Block scheduled ticks need a `ServerLevel`; they are counted only.
-  - `NeighborNotifyEvent` is not fired. No block entities. No random ticks.
+  - Its own neighbor updates do not fire `NeighborNotifyEvent`. A block hook can fire it.
+  - No block entities. No random ticks.
   - An entity query answers with no entities. A spawn is denied and counted per entity type.
   - The game rules turn block drops off. A dropped item is an entity the sandbox denies anyway.
 - The sandbox keeps a fluid state beside each block, so it hands back the state a tier
@@ -281,8 +282,8 @@ Development-only classes bound to the mod for runs, never packaged.
   - Each thread owns a sandbox, a settler and its probers.
   - Results assemble in type order, so the ids never depend on the thread count.
   - A tier that throws on the pool runs again on the calling thread, and every later tier too.
-  - A type that one thread holds longer than `probeStallSeconds` counts as such a failure. The
-    case is a hook that waits for the render thread, which waits for the pool.
+  - A thread without progress for `probeStallSeconds` counts as such a failure.
+    Progress is a candidate run or a settle.
 - Fluids without a block never enter the probe (`FluidBlocks.hasBlock`). Every candidate list
   holds only fluids with a block.
 - The registry tier (`RegistryProber`), per source form:

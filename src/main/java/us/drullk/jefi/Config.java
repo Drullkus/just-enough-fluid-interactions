@@ -28,8 +28,8 @@ public final class Config {
             .defineInRange("probeThreads", 0, 0, 16);
 
     public static final ModConfigSpec.IntValue PROBE_STALL_SECONDS = BUILDER
-            .comment("The maximum time in seconds for one fluid type per parallel process.",
-                    "If one fluid type takes more time, the probe stops the threads and continues on one thread.")
+            .comment("The maximum time in seconds that one probe thread can run without progress.",
+                    "If overrun, the probe stops the threads and continues on one thread.")
             .defineInRange("probeStallSeconds", 30, 5, 600);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_PROBE = BUILDER

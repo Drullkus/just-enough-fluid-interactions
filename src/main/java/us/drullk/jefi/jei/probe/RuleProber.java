@@ -73,7 +73,8 @@ public abstract class RuleProber {
             .<Map.Entry<Outcome, Group>>comparingInt(entry -> targets().indexOf(entry.getKey().target()))
             .thenComparing(entry -> primaryResultKey(entry.getKey()), Comparator.nullsLast(RecipeIds.LOCATION_ORDER))
             .thenComparing(entry -> describe(entry.getKey().results()));
-    private int runs;
+    /** The watchdog reads this from a different thread. */
+    private volatile int runs;
     private int skippedRuns;
     private int skippedTypes;
     private int dropped;
@@ -135,6 +136,11 @@ public abstract class RuleProber {
     /** The candidate runs an earlier run at the same target answered for. */
     int skippedRuns() {
         return skippedRuns;
+    }
+
+    /** Candidate runs so far. */
+    int runs() {
+        return runs;
     }
 
     /** Whether the config names this fluid. The config makes every tier probe the fluid. */

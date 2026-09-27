@@ -72,7 +72,8 @@ public final class Settler {
             .thenComparingInt(BlockPos::getZ);
 
     private final SandboxLevel level;
-    private int settled;
+    /** The watchdog reads this from a different thread. */
+    private volatile int settled;
     private long nanos;
 
     public Settler(SandboxLevel level) {
