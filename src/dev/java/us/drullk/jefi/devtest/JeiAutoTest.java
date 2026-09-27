@@ -52,6 +52,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -64,6 +65,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.fluids.FluidType;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
 /**
@@ -212,6 +214,8 @@ public final class JeiAutoTest {
         checkMerging(recipes);
         checkMergedAcrossMods(recipes);
         checkMergedWithinMod(recipes);
+        checkLockstepPairs(recipes);
+        checkDirection(recipes);
         checkFlowingNeighbor(recipes);
         checkSpreadRecipe(recipes);
         checkOwnerOrder(recipes);
@@ -458,14 +462,93 @@ public final class JeiAutoTest {
             LOGGER.info("Smoke test merged within a mod: {} lockstep recipe(s)", lockstep.size());
             return;
         }
-        List<FluidInteractionRecipe> own = lockstep.stream().filter(recipe -> AutoTestConfig.LOCKSTEP_MOD.equals(recipe.owner())).toList();
-        FluidInteractionRecipe recipe = own.size() == 1 ? own.getFirst() : null;
+        FluidInteractionRecipe recipe = withinRecipe;
         long sources = recipe == null ? 0 : recipe.rows().stream().map(row -> row.sourceFluids().getFirst()).distinct().count();
         long results = recipe == null ? 0 : recipe.rows().stream().map(FluidInteractionRecipe::resultAtSource).distinct().count();
         if (recipe == null || sources < 2 || results < 2) {
-            LOGGER.error("Smoke test expected one lockstep recipe of {} with several sources and results, found {} with {} source(s) and {} result(s)",
-                    AutoTestConfig.LOCKSTEP_MOD, own.size(), sources, results);
+            LOGGER.error("Smoke test expected a lockstep recipe of {} with several sources and results, found {} with {} source(s) and {} result(s)",
+                    AutoTestConfig.LOCKSTEP_MOD, recipe == null ? "none" : recipe.id(), sources, results);
         }
+    }
+
+    /** Rows that show different entries never repeat a pair with one result. */
+    private static void checkLockstepPairs(List<FluidInteractionRecipe> found) {
+        List<FluidInteractionRecipe> lockstep = found.stream().filter(FluidInteractionRecipe::isLockstep).toList();
+        int repeated = 0;
+        for (FluidInteractionRecipe recipe : lockstep) {
+            Set<List<String>> seen = new LinkedHashSet<>();
+            Set<List<String>> repeats = new LinkedHashSet<>();
+            Map<List<Object>, FluidInteractionRecipe> shown = new LinkedHashMap<>();
+            recipe.rows().forEach(row -> shown.putIfAbsent(List.of(row.sourceFluids(), row.neighborEntries(), describe(row.results())), row));
+            for (FluidInteractionRecipe row : shown.values()) {
+                Set<List<String>> pairs = new LinkedHashSet<>();
+                for (Fluid source : row.sourceFluids()) {
+                    for (Object neighbor : row.neighborEntries()) {
+                        List<String> pair = Stream.of(entryKey(source), entryKey(neighbor)).sorted().collect(Collectors.toCollection(ArrayList::new));
+                        pair.add(describe(row.results()).toString());
+                        pairs.add(pair);
+                    }
+                }
+                for (List<String> pair : pairs) {
+                    if (!seen.add(pair)) {
+                        repeats.add(pair);
+                    }
+                }
+            }
+            if (!repeats.isEmpty()) {
+                repeated += repeats.size();
+                LOGGER.error("Smoke test lockstep pairs: {} (from {}) repeats {}", recipe.id(), recipe.owner(), repeats);
+            }
+        }
+        LOGGER.info("Smoke test lockstep pairs: {} lockstep recipe(s), {} repeated pair(s)", lockstep.size(), repeated);
+    }
+
+    /** The two-direction Gaia fixture frees the source slot and the neighbor slot. */
+    private static void checkDirection(List<FluidInteractionRecipe> found) {
+        if (PackRun.ACTIVE) {
+            return;
+        }
+        Set<String> list = JeiAutoTestInteractions.DIRECTION_LIST.stream()
+                .map(type -> String.valueOf(BuiltInRegistries.FLUID.getKey(fluidOf(type)))).collect(Collectors.toSet());
+        Set<String> partners = JeiAutoTestInteractions.DIRECTION_PARTNERS.keySet().stream()
+                .map(type -> String.valueOf(BuiltInRegistries.FLUID.getKey(fluidOf(type)))).collect(Collectors.toSet());
+        FluidInteractionRecipe bySource = null;
+        FluidInteractionRecipe byNeighbor = null;
+        for (FluidInteractionRecipe recipe : found.stream().filter(FluidInteractionRecipe::isLockstep).toList()) {
+            Set<String> sources = recipe.rows().stream().flatMap(row -> row.sourceFluids().stream()).map(JeiAutoTest::entryKey).collect(Collectors.toSet());
+            Set<String> neighbors = recipe.rows().stream().flatMap(row -> row.neighborEntries().stream()).map(JeiAutoTest::entryKey).collect(Collectors.toSet());
+            if (FluidInteractionRecipe.sharesSources(recipe.rows()) && sources.equals(list) && neighbors.containsAll(partners)) {
+                bySource = recipe;
+            } else if (FluidInteractionRecipe.sharesNeighbors(recipe.rows()) && neighbors.equals(list) && sources.containsAll(partners)) {
+                byNeighbor = recipe;
+            }
+        }
+        if (bySource == null || byNeighbor == null) {
+            LOGGER.error("Smoke test direction: expected a lockstep recipe with the free source slot {} and one with the free neighbor slot {}, found {} and {}",
+                    list, list, bySource == null ? "none" : bySource.id(), byNeighbor == null ? "none" : byNeighbor.id());
+            return;
+        }
+        LOGGER.info("Smoke test direction: {} (from {}) frees the source slot with {} row(s), {} (from {}) frees the neighbor slot with {} row(s)",
+                bySource.id(), bySource.owner(), bySource.rows().size(), byNeighbor.id(), byNeighbor.owner(), byNeighbor.rows().size());
+    }
+
+    /** The still fluid of a fluid type, or water when the type has none. */
+    private static Fluid fluidOf(ResourceLocation type) {
+        FluidType fluidType = NeoForgeRegistries.FLUID_TYPES.get(type);
+        return BuiltInRegistries.FLUID.stream()
+                .filter(fluid -> fluid.getFluidType() == fluidType && fluid.defaultFluidState().isSource())
+                .findFirst()
+                .orElse(Fluids.WATER);
+    }
+
+    /** The registry key of a slot entry: a fluid, an item or a block. */
+    private static String entryKey(Object entry) {
+        return String.valueOf(switch (entry) {
+            case Fluid fluid -> BuiltInRegistries.FLUID.getKey(fluid);
+            case Item item -> BuiltInRegistries.ITEM.getKey(item);
+            case Block block -> BuiltInRegistries.BLOCK.getKey(block);
+            default -> entry;
+        });
     }
 
     /** The rows each linked slot holds, the scene against the slots while they cycle, and a focus on one result. */

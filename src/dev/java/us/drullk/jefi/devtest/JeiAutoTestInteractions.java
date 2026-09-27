@@ -1,10 +1,13 @@
 package us.drullk.jefi.devtest;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 
 import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -15,6 +18,7 @@ import net.neoforged.neoforge.common.NeoForgeMod;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInformation;
 import net.neoforged.neoforge.fluids.FluidType;
+import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
 /**
  * Development-only fluid interactions. The smoke test registers them when it is enabled. The smoke test uses
@@ -25,7 +29,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * interaction is registered on a water-tagged fluid for a lava neighbor. A level runs it before lava's spread
  * tick, so settling leaves that fluid out of vanilla's stone recipe. One interaction is registered on lava for
  * a water neighbor. A level answers it with the interaction registered before it. One interaction writes a
- * block without an item. One interaction writes obsidian from a lava source beside a block.
+ * block without an item. One interaction writes obsidian from a lava source beside a block. Eight
+ * interactions pair two Gaia fluids with two other fluids in both directions.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -57,6 +62,18 @@ public final class JeiAutoTestInteractions {
     static final Block ITEMLESS_NEIGHBOR = Blocks.FLOWER_POT;
     /** A block without an item that no tick changes. */
     static final Block ITEMLESS_RESULT = Blocks.POTTED_POPPY;
+
+    /** Fluid types that each meet every type of {@link #DIRECTION_PARTNERS} in both directions. */
+    static final List<ResourceLocation> DIRECTION_LIST = List.of(
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "mineral_water"),
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "sweet_muck"));
+    /** Each partner type with the block it makes with a type of {@link #DIRECTION_LIST}. */
+    static final Map<ResourceLocation, Block> DIRECTION_PARTNERS = new LinkedHashMap<>();
+
+    static {
+        DIRECTION_PARTNERS.put(ResourceLocation.withDefaultNamespace("water"), Blocks.PRISMARINE);
+        DIRECTION_PARTNERS.put(ResourceLocation.fromNamespaceAndPath("gaiadimension", "liquid_aura"), Blocks.AMETHYST_BLOCK);
+    }
 
     private JeiAutoTestInteractions() {
     }
@@ -116,6 +133,17 @@ public final class JeiAutoTestInteractions {
             FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
                     (level, pos, relativePos, state) -> state.isSource() && level.getBlockState(relativePos).is(OBSIDIAN_BLOCK_NEIGHBOR),
                     Blocks.OBSIDIAN.defaultBlockState()));
+            // Captures of Gaia fluid types credit these interactions to Gaia.
+            DIRECTION_PARTNERS.forEach((partner, result) -> {
+                for (ResourceLocation listed : DIRECTION_LIST) {
+                    FluidType listType = NeoForgeRegistries.FLUID_TYPES.get(listed);
+                    FluidType partnerType = NeoForgeRegistries.FLUID_TYPES.get(partner);
+                    if (listType != null && partnerType != null) {
+                        FluidInteractionRegistry.addInteraction(listType, new InteractionInformation(partnerType, result.defaultBlockState()));
+                        FluidInteractionRegistry.addInteraction(partnerType, new InteractionInformation(listType, result.defaultBlockState()));
+                    }
+                }
+            });
             // This interaction is for lava with water beside it. The interaction registered on lava before this
             // one answers first, so every arrangement settles as that one's result. This one's failure recipe
             // states what stands there instead.

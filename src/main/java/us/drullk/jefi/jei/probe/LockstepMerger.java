@@ -33,6 +33,8 @@ import net.neoforged.fml.ModList;
  * Merges the recipes of one mod with one {@link Shape} into one recipe of rows. A row shows one entry per linked
  * slot. A source or neighbor list that every row shares is one free slot.
  *
+ * <p>A group without a free slot splits by a list its members share.
+ *
  * <p>A group of more than {@link #MAX_ROWS} rows splits by neighbor entries, then by source fluids.
  *
  * <p>EMI shows a whole tag in place of its entries. So under EMI, a group that fills a tag stays apart.
@@ -97,11 +99,62 @@ final class LockstepMerger {
         return merged;
     }
 
+    private static List<List<FluidInteractionRecipe>> parts(List<FluidInteractionRecipe> group) {
+        List<List<FluidInteractionRecipe>> parts = new ArrayList<>();
+        byList(group).forEach(part -> parts.addAll(bySize(part)));
+        return parts;
+    }
+
+    /** Without a free slot, one part per list that several members share. */
+    private static List<List<FluidInteractionRecipe>> byList(List<FluidInteractionRecipe> group) {
+        if (group.size() == 1) {
+            return List.of(group);
+        }
+        List<FluidInteractionRecipe> rows = rows(group);
+        if (FluidInteractionRecipe.sharesSources(rows) || FluidInteractionRecipe.sharesNeighbors(rows)) {
+            return List.of(group);
+        }
+        Map<List<Object>, Integer> holders = new HashMap<>();
+        for (FluidInteractionRecipe member : group) {
+            for (boolean source : new boolean[] {true, false}) {
+                List<Object> key = listKey(member, source);
+                if (key != null) {
+                    holders.merge(key, 1, Integer::sum);
+                }
+            }
+        }
+        Map<List<Object>, List<FluidInteractionRecipe>> parts = new LinkedHashMap<>();
+        for (FluidInteractionRecipe member : group) {
+            List<Object> key = listKey(member, true);
+            if (key == null || holders.get(key) < 2) {
+                key = listKey(member, false);
+            }
+            if (key == null || holders.get(key) < 2) {
+                key = List.of();
+            }
+            parts.computeIfAbsent(key, k -> new ArrayList<>()).add(member);
+        }
+        if (parts.size() > 1) {
+            LOGGER.debug("Split {} recipe(s) of {} from {} into {} part(s) by the lists they share: {}", group.size(),
+                    group.getFirst().owner(), group.getFirst().id(), parts.size(),
+                    parts.values().stream().map(part -> part.getFirst().id() + " (" + part.size() + ")").toList());
+        }
+        return List.copyOf(parts.values());
+    }
+
+    /** The slot and its shared list of two or more entries, or null. */
+    private static @Nullable List<Object> listKey(FluidInteractionRecipe member, boolean source) {
+        Set<Set<Object>> lists = new HashSet<>();
+        member.rowsOrSelf().forEach(row -> lists.add(Set.copyOf(entries(row, source))));
+        Set<Object> list = lists.iterator().next();
+        return lists.size() == 1 && list.size() > 1 ? List.of(source, list) : null;
+    }
+
     /**
      * The group itself when its rows fit. Otherwise its members split by neighbor entries, then by source
      * fluids, in member order.
      */
-    private static List<List<FluidInteractionRecipe>> parts(List<FluidInteractionRecipe> group) {
+    private static List<List<FluidInteractionRecipe>> bySize(List<FluidInteractionRecipe> group) {
         if (group.size() == 1 || rows(group).size() <= MAX_ROWS) {
             return List.of(group);
         }
@@ -148,8 +201,7 @@ final class LockstepMerger {
 
     /** Joins rows that differ only in the source, or only in the neighbor, when every such group holds every value. */
     private static List<FluidInteractionRecipe> free(List<FluidInteractionRecipe> rows, boolean source) {
-        Function<FluidInteractionRecipe, List<Object>> values = row -> source ? List.copyOf(row.sourceFluids()) : row.neighborEntries();
-        List<Object> all = rows.stream().flatMap(row -> values.apply(row).stream()).distinct().toList();
+        List<Object> all = rows.stream().flatMap(row -> entries(row, source).stream()).distinct().toList();
         if (all.size() < 2) {
             return rows;
         }
@@ -159,7 +211,7 @@ final class LockstepMerger {
         }
         for (List<FluidInteractionRecipe> joined : groups.values()) {
             Set<Object> held = new HashSet<>();
-            joined.forEach(row -> held.addAll(values.apply(row)));
+            joined.forEach(row -> held.addAll(entries(row, source)));
             if (held.size() != all.size()) {
                 return rows;
             }
@@ -179,6 +231,10 @@ final class LockstepMerger {
                     first.conditions(), first.results(), null, first.owner(), first.inert()));
         }
         return free;
+    }
+
+    private static List<Object> entries(FluidInteractionRecipe row, boolean source) {
+        return source ? List.copyOf(row.sourceFluids()) : row.neighborEntries();
     }
 
     /** A row's placements and results, with the source or neighbor left out when not kept. */

@@ -147,10 +147,10 @@ Plugin code is under `us/drullk/jefi/jei/` in `probe`, `sandbox` and `scene`.
 - `us.drullk.jefi.Config`: the client config, file `config/justenoughfluidinteractions-client.toml`.
   - `hideUnprocessable`, `ignoredMods`: applied in `FluidInteractionsJeiPlugin.filter` after
     the probe and before the merge.
-  - `mergeAcrossMods`, default basalt, cobblestone, obsidian: recipes that make only these
-    blocks merge across mods (`RecipeMerger`).
-  - `mergeWithinMods`, default `alltheores`, `colouredstuff`, `create_dragons_plus`, `mingle`:
-    recipes of these mods merge into rows that cycle together (`LockstepMerger`).
+  - `mergeAcrossMods`: recipes that make only these blocks merge across mods (`RecipeMerger`).
+    The defaults are in `Config`.
+  - `mergeWithinMods`: recipes of these mods merge into rows that cycle together
+    (`LockstepMerger`). The defaults are in `Config`.
   - `ignoredFluids`, default `fun_fluids:flood`: the probe skips each listed fluid and every
     fluid that `isSame` with it, as a source and as a candidate. An existing file keeps its value.
   - `probeThreads`, `probeStallSeconds`: size and guard the pool.
@@ -421,7 +421,11 @@ Development-only classes bound to the mod for runs, never packaged.
   shape: tier, offsets, source forms and neighbor kinds.
   - The first two passes compare a fluid result by its still form. Members whose exact results
     differ become rows.
-  - A group of more than 100 rows splits by neighbor entries, then by source fluids. Each part
+  - A group whose rows have no free slot splits first. Members that share one list of two or
+    more entries in one slot form one part; the other members form one more part. Each part
+    frees the slot of its list. The first part keeps the group's id; each other part takes the
+    id of its first member. A part of one member stays a plain recipe.
+  - A part of more than 100 rows splits by neighbor entries, then by source fluids. Each part
     that fits merges. JEI cycles at most 100 entries of one slot on screen.
   - Rows drop only exact repeats.
 
@@ -495,8 +499,12 @@ One each unless stated.
 - `waterlog`: no result differs from its placed block only in its fluid. `hardening_brine`
   has one spread recipe.
 - `blockless`: the potted poppy slot holds an `ItemlessBlock`, and a focus on it finds the recipe.
-- `merged within a mod`: the gaiadimension lockstep recipe, 0 rows out of step while the
+- `merged within a mod`: the first gaiadimension lockstep recipe, 0 rows out of step while the
   slots cycle and under a focus on one result.
+- `direction`: the Gaia fixture gives one recipe with a free source slot and one with a free
+  neighbor slot.
+- `lockstep pairs`: no pair of entries repeats with one result. In a pack, Mingle's mirror rows
+  (copper beside zinc, zinc beside copper) log an ERROR that means nothing.
 - `recipe ids <sha-256>`: must not change between runs of one checkout.
 
 ### The other two runs
