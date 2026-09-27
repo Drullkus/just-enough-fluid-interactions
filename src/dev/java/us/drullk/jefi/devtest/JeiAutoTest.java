@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.InertFormIndicator;
+import us.drullk.jefi.jei.ItemlessBlock;
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
@@ -29,6 +30,12 @@ import us.drullk.jefi.jei.scene.SceneArrangement;
 import us.drullk.jefi.jei.scene.SceneVariant;
 import com.mojang.logging.LogUtils;
 
+import mezz.jei.api.gui.IRecipeLayoutDrawable;
+import mezz.jei.api.gui.ingredient.IRecipeSlotDrawable;
+import mezz.jei.api.gui.ingredient.IRecipeSlotView;
+import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.recipe.IFocus;
+import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
@@ -101,6 +108,7 @@ public final class JeiAutoTest {
     private static @Nullable FluidInteractionRecipe cascadeRecipe;
     private static @Nullable FluidInteractionRecipe offsetRecipe;
     private static @Nullable FluidInteractionRecipe preemptedRecipe;
+    private static @Nullable FluidInteractionRecipe blocklessRecipe;
 
     /** The recipes that get a screenshot of their own, in this order. Each is read when its step runs. */
     private static final List<Shot> SHOTS = List.of(
@@ -109,14 +117,19 @@ public final class JeiAutoTest {
             new Shot("neighbor", () -> neighborRecipe),
             new Shot("cascade", () -> cascadeRecipe),
             new Shot("offset", () -> offsetRecipe),
-            new Shot("preempted", () -> preemptedRecipe));
+            new Shot("preempted", () -> preemptedRecipe),
+            new Shot("blockless", () -> blocklessRecipe, true));
 
     private static final TickSteps STEPS = steps();
 
     private JeiAutoTest() {
     }
 
-    private record Shot(String name, Supplier<@Nullable FluidInteractionRecipe> recipe) {
+    /** @param focused JEI opens the recipe from a focus on its first output. */
+    private record Shot(String name, Supplier<@Nullable FluidInteractionRecipe> recipe, boolean focused) {
+        Shot(String name, Supplier<@Nullable FluidInteractionRecipe> recipe) {
+            this(name, recipe, false);
+        }
     }
 
     /**
@@ -196,6 +209,7 @@ public final class JeiAutoTest {
         checkOffsetRecipe(recipes);
         checkPreemptedInteraction(recipes);
         checkPreemptedThirdPartyInteraction(recipes);
+        checkBlockless(recipes);
         logRecipeIds(recipes);
         runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
     }
@@ -216,8 +230,48 @@ public final class JeiAutoTest {
 
     private static void show(Shot shot) {
         FluidInteractionRecipe recipe = shot.recipe().get();
-        if (recipe != null) {
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (recipe == null || runtime == null) {
+            return;
+        }
+        IFocus<?> focus = shot.focused() ? outputFocus(runtime, recipe) : null;
+        if (focus != null) {
+            runtime.getRecipesGui().show(focus);
+        } else {
             show(List.of(recipe));
+        }
+    }
+
+    /** A focus on a recipe's first output, as a click on that slot makes. */
+    private static @Nullable IFocus<?> outputFocus(IJeiRuntime runtime, FluidInteractionRecipe recipe) {
+        IRecipeSlotView output = outputSlots(runtime, recipe).stream().findFirst().orElse(null);
+        ITypedIngredient<?> shown = output == null ? null : output.getDisplayedIngredient().orElse(null);
+        return shown == null ? null : runtime.getJeiHelpers().getFocusFactory().createFocus(RecipeIngredientRole.OUTPUT, shown);
+    }
+
+    private static List<IRecipeSlotView> outputSlots(IJeiRuntime runtime, FluidInteractionRecipe recipe) {
+        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+        return runtime.getRecipeManager()
+                .createRecipeLayoutDrawable(category, recipe, runtime.getJeiHelpers().getFocusFactory().getEmptyFocusGroup())
+                .map(IRecipeLayoutDrawable::getRecipeSlotsView)
+                .map(view -> view.getSlotViews(RecipeIngredientRole.OUTPUT))
+                .orElse(List.of());
+    }
+
+    /** The tooltip lines of each output slot, with advanced tooltips on. */
+    @SuppressWarnings("removal")
+    private static List<List<String>> outputTooltips(IJeiRuntime runtime, FluidInteractionRecipe recipe) {
+        var options = Minecraft.getInstance().options;
+        boolean advanced = options.advancedItemTooltips;
+        options.advancedItemTooltips = true;
+        try {
+            return outputSlots(runtime, recipe).stream()
+                    .map(slot -> slot instanceof IRecipeSlotDrawable drawable
+                            ? drawable.getTooltip().stream().map(Component::getString).toList()
+                            : List.<String>of())
+                    .toList();
+        } finally {
+            options.advancedItemTooltips = advanced;
         }
     }
 
@@ -245,7 +299,12 @@ public final class JeiAutoTest {
     /** Screenshots the shown recipe and shows the next match. False when no match is left. */
     private static boolean nextCustomShot(Minecraft mc) {
         if (customShot < customShots.size()) {
-            grab(mc, "shot_" + sanitize(customShots.get(customShot).id().toString()));
+            FluidInteractionRecipe recipe = customShots.get(customShot);
+            grab(mc, "shot_" + sanitize(recipe.id().toString()));
+            IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+            if (runtime != null) {
+                LOGGER.info("{} shot {}: output tooltip(s) {}", PREFIX, recipe.id(), outputTooltips(runtime, recipe));
+            }
             customShot++;
         }
         if (customShot >= customShots.size()) {
@@ -939,6 +998,46 @@ public final class JeiAutoTest {
             LOGGER.error("Smoke test expected the failure text of {} to name {}, found \"{}\"", recipe.id(), missing, text);
         }
         LOGGER.info("Smoke test pre-empted third-party interaction {}: {}", recipe.id(), text);
+    }
+
+    /** The output slot holds an itemless block that a focus finds and the list omits. */
+    private static void checkBlockless(List<FluidInteractionRecipe> found) {
+        BlockState result = JeiAutoTestInteractions.ITEMLESS_RESULT.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> result.equals(recipe.resultAtSource()))
+                .toList();
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (matches.size() != 1 || runtime == null) {
+            LOGGER.error("Smoke test expected one {} recipe, found {}", BuiltInRegistries.BLOCK.getKey(result.getBlock()), matches.size());
+            return;
+        }
+        FluidInteractionRecipe recipe = matches.getFirst();
+        blocklessRecipe = recipe;
+        List<IRecipeSlotView> outputs = outputSlots(runtime, recipe);
+        ITypedIngredient<?> shown = outputs.isEmpty() ? null : outputs.getFirst().getDisplayedIngredient().orElse(null);
+        if (shown == null || shown.getType() != ItemlessBlock.TYPE) {
+            LOGGER.error("Smoke test expected the output slot of {} to hold an itemless block, found {}", recipe.id(),
+                    shown == null ? null : shown.getType().getUid());
+            return;
+        }
+        List<String> tooltip = outputTooltips(runtime, recipe).getFirst();
+        String name = result.getBlock().getName().getString();
+        if (!tooltip.contains(name) || tooltip.stream().noneMatch(line -> line.contains(recipe.id().toString()))) {
+            LOGGER.error("Smoke test expected the output tooltip of {} to name {} and the recipe id, found {}", recipe.id(), name, tooltip);
+        }
+        int listed = runtime.getIngredientManager().getAllIngredients(ItemlessBlock.TYPE).size();
+        IFocus<ItemlessBlock> focus = runtime.getJeiHelpers().getFocusFactory()
+                .createFocus(RecipeIngredientRole.OUTPUT, ItemlessBlock.TYPE, new ItemlessBlock(result));
+        List<FluidInteractionRecipe> focused = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE)
+                .limitFocus(List.of(focus))
+                .get()
+                .toList();
+        if (listed != 0 || !focused.contains(recipe)) {
+            LOGGER.error("Smoke test expected no listed itemless block and a focus that finds {}, found {} listed, {} recipe(s) found",
+                    recipe.id(), listed, focused.size());
+        }
+        LOGGER.info("Smoke test blockless {} (from {}): output type {}, {} listed ingredient(s), the focus finds {} recipe(s), tooltip {}",
+                recipe.id(), recipe.owner(), shown.getType().getUid(), listed, focused.size(), tooltip);
     }
 
     private static String failureText(FluidInteractionRecipe recipe) {

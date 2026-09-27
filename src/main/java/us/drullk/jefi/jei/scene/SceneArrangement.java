@@ -4,8 +4,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 
+import us.drullk.jefi.jei.ItemlessBlock;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 
@@ -129,6 +131,9 @@ public final class SceneArrangement {
         if (ingredient instanceof ItemStack stack) {
             ItemStack item = placement.asItem();
             return !item.isEmpty() && ItemStack.isSameItem(item, stack);
+        }
+        if (ingredient instanceof ItemlessBlock(BlockState state)) {
+            return !placement.isFluid() && placement.block().is(state.getBlock());
         }
         return false;
     }

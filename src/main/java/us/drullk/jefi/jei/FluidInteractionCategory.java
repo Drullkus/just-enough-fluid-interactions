@@ -336,7 +336,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     }
 
     /**
-     * Adds each placement as a fluid or item ingredient. A block without an item shows only in the scene.
+     * Adds each placement as a fluid, an item, or an {@link ItemlessBlock}.
      * JEI only knows still fluids, so both forms of one fluid share one cycling entry.
      */
     private static void addPlacements(IRecipeSlotBuilder slot, List<Placement> placements) {
@@ -350,13 +350,15 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
                 continue;
             }
             ItemStack item = placement.asItem();
-            if (!item.isEmpty()) {
+            if (item.isEmpty()) {
+                slot.addIngredient(ItemlessBlock.TYPE, new ItemlessBlock(placement.block()));
+            } else {
                 slot.addItemStack(item);
             }
         }
     }
 
-    /** The still form of the fluid a slot is currently cycling to, or null when it shows an item or nothing. */
+    /** The still form of the fluid a slot is currently cycling to, or null when it shows no fluid. */
     static @Nullable Fluid displayedFluid(IRecipeSlotView view) {
         ITypedIngredient<?> displayed = view.getDisplayedIngredient().orElse(null);
         if (displayed == null || !(displayed.getIngredient() instanceof FluidStack stack)) {

@@ -24,7 +24,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * set of interactions must collapse into a single recipe, through both of {@code RecipeMerger}'s passes. One
  * interaction is registered on a water-tagged fluid for a lava neighbor. A level runs it before lava's spread
  * tick, so settling leaves that fluid out of vanilla's stone recipe. One interaction is registered on lava for
- * a water neighbor. A level answers it with the interaction registered before it.
+ * a water neighbor. A level answers it with the interaction registered before it. One interaction writes a
+ * block without an item.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -46,6 +47,11 @@ public final class JeiAutoTestInteractions {
     static final Block OFFSET_RESULT = Blocks.POLISHED_TUFF;
     /** A waterloggable block whose {@code offsetType} is {@code XZ}, not {@code NONE} (checked against 1.21.1's {@code Blocks}). */
     static final Block OFFSET_CONDITION = Blocks.POINTED_DRIPSTONE;
+
+    /** The neighbor of a water source that writes {@link #ITEMLESS_RESULT}. */
+    static final Block ITEMLESS_NEIGHBOR = Blocks.FLOWER_POT;
+    /** A block without an item that no tick changes. */
+    static final Block ITEMLESS_RESULT = Blocks.POTTED_POPPY;
 
     private JeiAutoTestInteractions() {
     }
@@ -99,6 +105,10 @@ public final class JeiAutoTestInteractions {
                         level.setBlock(relativePos,
                                 OFFSET_CONDITION.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true), Block.UPDATE_ALL);
                     }));
+            // A water source beside a flower pot becomes a potted poppy, which has no item.
+            FluidInteractionRegistry.addInteraction(NeoForgeMod.WATER_TYPE.value(), new InteractionInformation(
+                    (level, pos, relativePos, state) -> state.isSource() && level.getBlockState(relativePos).is(ITEMLESS_NEIGHBOR),
+                    ITEMLESS_RESULT.defaultBlockState()));
             // This interaction is for lava with water beside it. The interaction registered on lava before this
             // one answers first, so every arrangement settles as that one's result. This one's failure recipe
             // states what stands there instead.

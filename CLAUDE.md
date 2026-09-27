@@ -114,7 +114,8 @@ GitHub Packages credentials are Gradle properties in the user's global
   - `-Ppack=<name>` runs the pack in `test-pack/<name>` instead. The run copies only `*.jar`.
   - `-PpackHeap=<size>` sets the heap of a pack run, default `12g`. The Everything pack needs
     about 10 GB.
-  - `-Pshots=<text>` also screenshots every recipe whose id contains the text.
+  - `-Pshots=<text>` also screenshots every recipe whose id contains the text. Each shot logs
+    the tooltips of its output slots.
   - Run one pack client at a time on this machine.
 - A profile: `-Pjfr=<file>` on a pack run records a JFR profile.
   - Set `JAVA_TOOL_OPTIONS="-XX:FlightRecorderOptions=stackdepth=192"` for the run. A
@@ -164,7 +165,8 @@ Development-only classes bound to the mod for runs, never packaged.
   in a test run. The file on disk keeps its value.
 - `PackRun`: clears `SharedConstants.IS_RUNNING_IN_IDE` for pack runs. NeoForge's gametest
   scan loads every mod's gametest classes in a dev run.
-- `JeiAutoTestInteractions`: the dev-only interactions.
+- `JeiAutoTestInteractions`: the dev-only interactions. One writes a potted poppy, a block
+  without an item.
 - `JeiAutoTestFluids`: two dev-only fluids. A `Fluid` claims its registry holder in its
   constructor, so they are built inside `RegisterEvent`.
   - `hardening_brine`: hardens lava-tagged fluids below it, source form only.
@@ -201,6 +203,12 @@ Development-only classes bound to the mod for runs, never packaged.
 - `InertFormIndicator`: an `IRecipeWidget` per input slot whose fluid has an inert other form
   in `FluidInteractionRecipe.inert`. It draws a yellow "!" at the slot's top-left each frame.
   JEI draws a small triple bar there before a slot cycles. The slot's yellow line explains it.
+- A block without an item is an `ItemlessBlock` ingredient in every slot.
+  - It registers with an empty list and a codec. A focus on it still finds its recipe.
+  - Without it, a recipe has no output, no recipe id in the tooltip and no bookmark button.
+  - JEMI wraps it in a `JemiStack` and draws it with the JEI renderer.
+  - Its renderer draws each quad in the block's own render type, with the face shade of
+    `SandboxLevel.directionalShade`. A `"shade": false` quad, like fire, stays bright.
 - Slot roles decide what viewers count as a cost.
   - INPUT: a result is written at the placement's offset and no alternative is a flowing
     fluid. A flow costs nothing; its source block survives.
@@ -439,12 +447,14 @@ One each unless stated.
 - `cascade`: honey with still water above carries the crystal and the sugar water it writes.
 - `pre-empted interaction` and `pre-empted third-party interaction`, quoting the failure texts.
 - `offset recipe`: the dripstone condition recorded waterlogged.
+- `blockless`: the potted poppy slot holds an `ItemlessBlock`, and a focus on it finds the recipe.
 - `recipe ids <sha-256>`: must not change between runs of one checkout.
 
 ### The other two runs
 
-- EMI: `EMI test found N recipe(s)` with the JEI run's count, five `EMI test screenshot`
-  lines, one `EMI test clicked the left scene` line, no `Exception adding JEMI extras`.
+- EMI: `EMI test found N recipe(s)` with the JEI run's count, six `EMI test screenshot`
+  lines, one `EMI test clicked the left scene` line, one `EMI test blockless` line, no
+  `Exception adding JEMI extras`.
 - Grounding: `Grounded N recipe alternative(s) of M recipe(s): 0 mismatch(es)`, with `0 of
   them holding a fluid no level can hold`, and no `Grounding mismatch` line.
 
@@ -455,4 +465,5 @@ One each unless stated.
 - `_cascade.png`: two output slots.
 - `_preempted.png`: the source slot over the wrapped observation text.
 - `_offset.png`: a grid-aligned water cube around the offset dripstone.
+- `_blockless.png`: water and a flower pot, a potted poppy in the output slot.
 - Crop and enlarge with `sips` or PIL when a detail matters.

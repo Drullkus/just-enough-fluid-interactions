@@ -575,6 +575,11 @@ public final class SandboxLevel extends VirtualLevel {
 
     @Override
     public float getShade(Direction direction, boolean shade) {
+        return directionalShade(direction, shade);
+    }
+
+    /** The overworld's face shade of a client level. */
+    public static float directionalShade(Direction direction, boolean shade) {
         if (!shade) {
             return 1.0F;
         }

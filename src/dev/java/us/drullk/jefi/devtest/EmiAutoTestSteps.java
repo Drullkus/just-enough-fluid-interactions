@@ -8,11 +8,14 @@ import org.slf4j.Logger;
 
 import us.drullk.jefi.jei.FluidInteractionCategory;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
+import us.drullk.jefi.jei.ItemlessBlock;
 import com.mojang.logging.LogUtils;
 
 import dev.emi.emi.api.EmiApi;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
+import dev.emi.emi.api.stack.EmiStack;
+import dev.emi.emi.jemi.JemiStack;
 import dev.emi.emi.screen.RecipeScreen;
 import dev.emi.emi.screen.WidgetGroup;
 import net.minecraft.client.Minecraft;
@@ -35,7 +38,7 @@ final class EmiAutoTestSteps {
     /**
      * The test runs as a list of steps. It enters the world. It opens the category. It screenshots the category
      * and the first recipes. It clicks the left scene of the recipe on screen. It screenshots the recipe turned.
-     * It stops the client.
+     * It shows the recipe with a block without an item and screenshots it. It stops the client.
      */
     private static final TickSteps STEPS = new TickSteps()
             .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
@@ -51,6 +54,8 @@ final class EmiAutoTestSteps {
             .repeat(25, EmiAutoTestSteps::nextRecipe)
             .after(10, EmiAutoTestSteps::rotate)
             .after(20, mc -> grab(mc, "rotated"))
+            .after(10, EmiAutoTestSteps::showBlockless)
+            .after(20, mc -> grab(mc, "blockless"))
             .after(10, mc -> {
                 LOGGER.info("{} finished, stopping the client", PREFIX);
                 mc.stop();
@@ -109,6 +114,32 @@ final class EmiAutoTestSteps {
         } else {
             LOGGER.error("{} clicked the left scene at {}, {} and nothing took the click", PREFIX, x, y);
         }
+    }
+
+    /** JEMI wraps the {@link ItemlessBlock} in a stack that finds its recipe. */
+    private static void showBlockless(Minecraft mc) {
+        EmiRecipe found = null;
+        EmiStack output = null;
+        for (EmiRecipe recipe : recipes) {
+            for (EmiStack stack : recipe.getOutputs()) {
+                if (stack instanceof JemiStack<?> jemi && jemi.ingredient instanceof ItemlessBlock block
+                        && block.state().is(JeiAutoTestInteractions.ITEMLESS_RESULT)) {
+                    found = recipe;
+                    output = stack;
+                }
+            }
+        }
+        if (found == null) {
+            LOGGER.error("{} found no recipe with an itemless block output", PREFIX);
+            return;
+        }
+        List<EmiRecipe> byOutput = EmiApi.getRecipeManager().getRecipesByOutput(output);
+        if (!byOutput.contains(found)) {
+            LOGGER.error("{} blockless {}: EMI finds {} recipe(s) by the output, not this one", PREFIX, found.getId(), byOutput.size());
+        }
+        LOGGER.info("{} blockless {}: output {}, EMI finds {} recipe(s) by the output", PREFIX, found.getId(),
+                output.getName().getString(), byOutput.size());
+        EmiApi.displayRecipe(found);
     }
 
     /** EMI keeps the groups of the page it shows to itself. The recipe this test clicks is the first group. */
