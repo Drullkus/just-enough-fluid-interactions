@@ -43,10 +43,12 @@ public final class JeiAutoTestInteractions {
     static final Block DYED_SOURCE_RESULT = Blocks.BLUE_TERRACOTTA;
     static final Block DYED_FLOWING_RESULT = Blocks.CYAN_TERRACOTTA;
 
-    /** Written at the source when the dev fluid waterlogs {@link #OFFSET_CONDITION} beside it. */
+    /** Written at the source when the dev fluid meets {@link #OFFSET_TRIGGER} beside it. */
     static final Block OFFSET_RESULT = Blocks.POLISHED_TUFF;
     /** A waterloggable block whose {@code offsetType} is {@code XZ}, not {@code NONE} (checked against 1.21.1's {@code Blocks}). */
     static final Block OFFSET_CONDITION = Blocks.POINTED_DRIPSTONE;
+    /** The neighbor the dev fluid turns into a waterlogged {@link #OFFSET_CONDITION}. */
+    static final Block OFFSET_TRIGGER = Blocks.DRIPSTONE_BLOCK;
 
     /** The neighbor of a water source that writes {@link #ITEMLESS_RESULT}. */
     static final Block ITEMLESS_NEIGHBOR = Blocks.FLOWER_POT;
@@ -94,12 +96,10 @@ public final class JeiAutoTestInteractions {
                             MERGE_RESULT.defaultBlockState()));
                 }
             }
-            // The dev water-tagged fluid beside a pointed dripstone waterlogs it with plain water, not with
-            // itself. The dripstone is a random-offset block that shares its cell with a fluid, the fixture for
-            // the scene renderer. A settled level keeps this write, because the fluid it holds is not one the
-            // arrangement itself poured.
+            // The dev fluid turns a dripstone block beside it into waterlogged pointed dripstone.
+            // That result is a random-offset block that shares its cell with a fluid.
             FluidInteractionRegistry.addInteraction(JeiAutoTestFluids.dyedType(), new InteractionInformation(
-                    (level, pos, relativePos, state) -> level.getBlockState(relativePos).is(OFFSET_CONDITION),
+                    (level, pos, relativePos, state) -> level.getBlockState(relativePos).is(OFFSET_TRIGGER),
                     (level, pos, relativePos, state) -> {
                         level.setBlock(pos, OFFSET_RESULT.defaultBlockState(), Block.UPDATE_ALL);
                         level.setBlock(relativePos,

@@ -182,6 +182,8 @@ public final class InteractionProber {
                 sum(worker -> worker.registry.skippedRuns()));
         LOGGER.debug("Swept the predicate's own fluid type first in {} sweep(s) of NeoForge's fluid type predicate",
                 sum(worker -> worker.registry.shortlisted()));
+        LOGGER.debug("Dropped {} arrangement(s) of the fluid interactions that change only the fluid a block holds",
+                sum(worker -> worker.registry.fluidOnlyHits()));
         return new Tier(found, count, System.nanoTime() - start);
     }
 
@@ -373,24 +375,32 @@ public final class InteractionProber {
 
     /**
      * The types worth probing: the ones a level can hold a fluid of. A type whose every fluid has no block can
-     * stand nowhere. So no tier probes its interactions.
+     * stand nowhere. So no tier probes its interactions. No tier probes a type the config ignores.
      */
-    private static List<FluidType> probable(List<FluidType> types, Map<FluidType, List<InteractionInformation>> registered) {
+    private List<FluidType> probable(List<FluidType> types, Map<FluidType, List<InteractionInformation>> registered) {
         List<FluidType> probable = new ArrayList<>(types.size());
         int skippedTypes = 0;
         int skippedInteractions = 0;
+        int ignoredTypes = 0;
+        int ignoredInteractions = 0;
         for (FluidType type : types) {
-            if (FluidBlocks.hasBlock(type)) {
-                probable.add(type);
-                continue;
-            }
             int interactions = registered.getOrDefault(type, List.of()).size();
-            skippedTypes++;
-            skippedInteractions += interactions;
-            LOGGER.debug("Skipped {} fluid interaction(s) on {}, no fluid of which has a block", interactions, RecipeIds.keyOf(type));
+            if (!FluidBlocks.hasBlock(type)) {
+                skippedTypes++;
+                skippedInteractions += interactions;
+                LOGGER.debug("Skipped {} fluid interaction(s) on {}, no fluid of which has a block", interactions, RecipeIds.keyOf(type));
+            } else if (candidates.ignores(type)) {
+                ignoredTypes++;
+                ignoredInteractions += interactions;
+                LOGGER.debug("Skipped {} fluid interaction(s) on {}, every fluid of which the config ignores", interactions, RecipeIds.keyOf(type));
+            } else {
+                probable.add(type);
+            }
         }
         LOGGER.debug("Skipped {} fluid interaction(s) on {} fluid type(s) whose fluids have no block",
                 skippedInteractions, skippedTypes);
+        LOGGER.debug("Skipped {} fluid interaction(s) on {} fluid type(s) whose fluids the config ignores",
+                ignoredInteractions, ignoredTypes);
         return probable;
     }
 

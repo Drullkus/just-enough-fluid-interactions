@@ -147,6 +147,8 @@ Plugin code is under `us/drullk/jefi/jei/` in `probe`, `sandbox` and `scene`.
 - `us.drullk.jefi.Config`: the client config, file `config/justenoughfluidinteractions-client.toml`.
   - `hideUnprocessable`, `ignoredMods`: applied in `FluidInteractionsJeiPlugin.filter` after
     the probe.
+  - `ignoredFluids`, default `fun_fluids:flood`: the probe skips each listed fluid and every
+    fluid that `isSame` with it, as a source and as a candidate. An existing file keeps its value.
   - `probeThreads`, `probeStallSeconds`: size and guard the pool.
   - `forceProbe`: adds fluids to the spread and neighbor tiers.
 
@@ -169,10 +171,12 @@ Development-only classes bound to the mod for runs, never packaged.
   without an item.
 - `JeiAutoTestFluids`: two dev-only fluids. A `Fluid` claims its registry holder in its
   constructor, so they are built inside `RegisterEvent`.
-  - `hardening_brine`: hardens lava-tagged fluids below it, source form only.
+  - `hardening_brine`: hardens lava-tagged fluids below it, source form only. Both forms
+    waterlog a dry waterloggable block below it with plain water.
   - `dyed_water`: no spread code; water-tagged through
     `src/dev/resources/data/minecraft/tags/fluid/water.json` with `required: false`; one
-    interaction with lava beside it; one with a pointed dripstone that it waterlogs.
+    interaction with lava beside it; one that turns a dripstone block beside it into
+    waterlogged pointed dripstone.
 - `build.gradle` declares `sourceSets { dev }`. Naming `src/dev/java` or `src/dev/resources`
   again feeds every dev resource to `processDevResources` twice.
 
@@ -307,6 +311,7 @@ Development-only classes bound to the mod for runs, never packaged.
   - a greedy multi-position search when nothing fired; the sandbox records what the predicate
     reads;
   - writes from the predicate count too;
+  - a write that changes only the fluid a block holds is not part of a hit;
   - NeoForge's own type predicate passes only for its type (`TypePredicate`), so those fluids
     go first.
 - `RunMemo`. Between two candidates at one target, the level differs only there.
@@ -316,7 +321,8 @@ Development-only classes bound to the mod for runs, never packaged.
   - When the shared answer changes nothing, the sweep stops.
 - The spread tier (`SpreadProber`).
   - It ticks the still and flowing source states with one candidate below or beside. It keeps
-    writes that are not air and not a state of the source fluid.
+    writes that are not air, not a state of the source fluid, and not the placed block with
+    only another fluid in it.
   - Only fluids whose own classes, below `FlowingFluid` and `BaseFlowingFluid`, declare
     `tick`, `spread`, `spreadTo`, `canSpreadTo`, `getNewLiquid` or `beforeDestroyingBlock` are
     ticked. `forceProbe` adds fluids.
@@ -336,12 +342,16 @@ Development-only classes bound to the mod for runs, never packaged.
     candidate below, beside or above.
   - It never calls the candidate's hooks. A plain `LiquidBlock` runs the registry. Any other
     block is probed as a source in its own turn.
+  - A write that changes only the fluid a placed block holds is no hit.
 - The settle step (`Settler`). All tiers only generate candidates.
   - It builds every hit live: `Fixtures` first, then the content, then the source. A level
     runs the placed block's hooks before it notifies neighbors.
   - It runs the fluid ticks for `Settler.SETTLE_TICKS`.
   - The results are the settled diff over the arrangement plus the rule's write positions:
-    never air, never what was placed, never a state of a poured fluid.
+    never air, never what was placed, never a state of a poured fluid, never what was placed
+    with only another fluid in it.
+  - `Settler.onlyFluidDiffers`: the same block, and each changed property is `WATERLOGGED` or
+    alone changes the fluid state. A flooded or waterlogged block is no interaction.
   - The arrangement stays with its tier only where the settled level still holds what the
     rule wrote; a fluid counts as itself at any level. Otherwise it is dropped with a debug
     `A level pre-empts ...` line.
@@ -412,6 +422,8 @@ are in `run/logs/debug.log`. An `ERROR` from a smoke-test check is a regression.
 - `Denied N entity spawn(s)`.
 - `Skipped N fluid interaction(s) on M fluid type(s) whose fluids have no block`. In dev: BOP
   on milk, Create's potion and tea.
+- `Skipped N fluid interaction(s) on M fluid type(s) whose fluids the config ignores`.
+- `Dropped N arrangement(s) of the fluid interactions that change only the fluid a block holds`.
 - One `A level pre-empts N of the M arrangement(s)` per fully pre-empted interaction. In dev:
   the dev lava fixture, BOP's honey and royal jelly in both forms.
 - One `A level pre-empts ...` per dropped alternative and form. In dev: both forms of
@@ -446,7 +458,9 @@ One each unless stated.
 - `own rule`: no recipe carries another rule's result.
 - `cascade`: honey with still water above carries the crystal and the sugar water it writes.
 - `pre-empted interaction` and `pre-empted third-party interaction`, quoting the failure texts.
-- `offset recipe`: the dripstone condition recorded waterlogged.
+- `offset recipe`: the dripstone block beside the source becomes waterlogged pointed dripstone.
+- `waterlog`: no result differs from its placed block only in its fluid. `hardening_brine`
+  has one spread recipe.
 - `blockless`: the potted poppy slot holds an `ItemlessBlock`, and a focus on it finds the recipe.
 - `recipe ids <sha-256>`: must not change between runs of one checkout.
 

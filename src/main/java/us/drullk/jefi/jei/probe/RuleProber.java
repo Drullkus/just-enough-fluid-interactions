@@ -30,11 +30,12 @@ import net.neoforged.neoforge.fluids.FluidType;
  * A discovery tier that calls one rule of a fluid by hand.
  *
  * <p>The source fluid sits at {@link SandboxLevel#ORIGIN} and one candidate sits at one target position. The
- * tier calls the rule's hook in the quiet sandbox and reads what the hook wrote. A write that is not air and not
- * a state of a fluid in the arrangement is a hit. The hook call is a filter and not an answer. {@link Settler}
- * builds every hit with the semantics of a level. What the level settles on is the recipe. The writes of the
- * hook are also the measure. The settled level can hold something different where the hook wrote. A different
- * rule then owns that outcome, and the tier drops the arrangement.
+ * tier calls the rule's hook in the quiet sandbox and reads what the hook wrote. A write that is not air, not
+ * the placed block with another fluid in it, and not a state of a fluid in the arrangement is a hit. The hook
+ * call is a filter and not an answer. {@link Settler} builds every hit with the semantics of a level. What the
+ * level settles on is the recipe. The writes of the hook are also the measure. The settled level can hold
+ * something different where the hook wrote. A different rule then owns that outcome, and the tier drops the
+ * arrangement.
  *
  * <p>The tier probes only a fluid whose own classes declare the hook ({@link #declaresHook}). The config value
  * {@code forceProbe} adds fluids whose rule lives outside their classes, such as a mixin.
@@ -335,7 +336,8 @@ public abstract class RuleProber {
     /**
      * Places one arrangement and calls the hook, unless an earlier run at the target already answers for this
      * candidate ({@link RunMemo}). Returns the writes that change a position, keyed by offset from the source.
-     * A write of air, of what the tier placed, or of an own fluid's state is not a change.
+     * A write of air, of what the tier placed, of that block with another fluid in it
+     * ({@link Settler#onlyFluidDiffers}), or of an own fluid's state is not a change.
      *
      * <p>A source form whose own classes declare no hook is probed because its other form does. Its code is all
      * inherited, and inherited code writes only the fluid's own states. So that form changes nothing at any
@@ -445,7 +447,7 @@ public abstract class RuleProber {
     }
 
     private static boolean transformed(BlockState placed, BlockState written, Set<Fluid> own) {
-        if (written.isAir() || written.equals(placed)) {
+        if (written.isAir() || written.equals(placed) || Settler.onlyFluidDiffers(placed, written)) {
             return false;
         }
         FluidState fluid = written.getFluidState();

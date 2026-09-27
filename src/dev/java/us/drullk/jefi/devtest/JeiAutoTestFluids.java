@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.api.distmarker.Dist;
@@ -165,9 +166,26 @@ public final class JeiAutoTestFluids {
         return ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID, path);
     }
 
-    /** Lets both forms reach a lava-tagged fluid below, which vanilla otherwise reserves for water-tagged ones. */
-    private static boolean reaches(FluidState toFluidState, Direction direction) {
-        return direction == Direction.DOWN && toFluidState.is(FluidTags.LAVA);
+    /** Lets both forms reach a lava-tagged fluid or a dry waterloggable block below. */
+    private static boolean reaches(BlockState toBlockState, FluidState toFluidState, Direction direction) {
+        return direction == Direction.DOWN && (toFluidState.is(FluidTags.LAVA) || dry(toBlockState));
+    }
+
+    private static boolean dry(BlockState state) {
+        return state.hasProperty(BlockStateProperties.WATERLOGGED) && !state.getValue(BlockStateProperties.WATERLOGGED);
+    }
+
+    /** Both forms waterlog a block below with plain water, as a flood fluid does. */
+    private static boolean spreadsOwnWay(Fluid fluid, LevelAccessor level, BlockPos pos, BlockState blockState, Direction direction) {
+        if (hardens(fluid, blockState, direction)) {
+            level.setBlock(pos, RESULT.defaultBlockState(), Block.UPDATE_ALL);
+            return true;
+        }
+        if (direction == Direction.DOWN && dry(blockState)) {
+            level.setBlock(pos, blockState.setValue(BlockStateProperties.WATERLOGGED, true), Block.UPDATE_ALL);
+            return true;
+        }
+        return false;
     }
 
     /** Only the source fluid hardens what it lands on. The flowing fluid falls through to plain spreading. */
@@ -183,14 +201,13 @@ public final class JeiAutoTestFluids {
         @Override
         protected boolean canSpreadTo(BlockGetter level, BlockPos fromPos, BlockState fromBlockState, Direction direction,
                                       BlockPos toPos, BlockState toBlockState, FluidState toFluidState, Fluid fluid) {
-            return reaches(toFluidState, direction)
+            return reaches(toBlockState, toFluidState, direction)
                     || super.canSpreadTo(level, fromPos, fromBlockState, direction, toPos, toBlockState, toFluidState, fluid);
         }
 
         @Override
         protected void spreadTo(LevelAccessor level, BlockPos pos, BlockState blockState, Direction direction, FluidState fluidState) {
-            if (hardens(this, blockState, direction)) {
-                level.setBlock(pos, RESULT.defaultBlockState(), Block.UPDATE_ALL);
+            if (spreadsOwnWay(this, level, pos, blockState, direction)) {
                 return;
             }
             super.spreadTo(level, pos, blockState, direction, fluidState);
@@ -205,14 +222,13 @@ public final class JeiAutoTestFluids {
         @Override
         protected boolean canSpreadTo(BlockGetter level, BlockPos fromPos, BlockState fromBlockState, Direction direction,
                                       BlockPos toPos, BlockState toBlockState, FluidState toFluidState, Fluid fluid) {
-            return reaches(toFluidState, direction)
+            return reaches(toBlockState, toFluidState, direction)
                     || super.canSpreadTo(level, fromPos, fromBlockState, direction, toPos, toBlockState, toFluidState, fluid);
         }
 
         @Override
         protected void spreadTo(LevelAccessor level, BlockPos pos, BlockState blockState, Direction direction, FluidState fluidState) {
-            if (hardens(this, blockState, direction)) {
-                level.setBlock(pos, RESULT.defaultBlockState(), Block.UPDATE_ALL);
+            if (spreadsOwnWay(this, level, pos, blockState, direction)) {
                 return;
             }
             super.spreadTo(level, pos, blockState, direction, fluidState);

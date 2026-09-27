@@ -48,6 +48,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
@@ -210,6 +211,7 @@ public final class JeiAutoTest {
         checkPreemptedInteraction(recipes);
         checkPreemptedThirdPartyInteraction(recipes);
         checkBlockless(recipes);
+        checkWaterlog(recipes);
         logRecipeIds(recipes);
         runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
     }
@@ -907,24 +909,20 @@ public final class JeiAutoTest {
                 recipe.neighbors().stream().map(placement -> placement.describe().getString()).toList());
     }
 
-    /**
-     * The dripstone beside the dev fluid is the probed neighbor. So the interaction's own write at that offset
-     * waterlogs it in place. This write survives settling because it carries a fluid other than the one the
-     * arrangement poured. It must carry {@link BlockStateProperties#WATERLOGGED} so the scene can draw a block
-     * whose model offset and fluid share one cell.
-     */
+    /** The dev fluid writes waterlogged pointed dripstone where the dripstone block stood. */
     private static void checkOffsetRecipe(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> matches = found.stream()
-                .filter(recipe -> recipe.neighbors().stream().anyMatch(placement -> placement.block().is(JeiAutoTestInteractions.OFFSET_CONDITION)))
+                .filter(recipe -> recipe.neighbors().stream().anyMatch(placement -> placement.block().is(JeiAutoTestInteractions.OFFSET_TRIGGER)))
                 .toList();
         if (matches.size() != 1) {
             LOGGER.error("Smoke test expected one recipe with a {} condition, found {}",
-                    BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OFFSET_CONDITION), matches.size());
+                    BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OFFSET_TRIGGER), matches.size());
             return;
         }
         FluidInteractionRecipe recipe = matches.getFirst();
         BlockState written = recipe.results().get(recipe.neighborOffset());
-        if (written == null || !written.hasProperty(BlockStateProperties.WATERLOGGED) || !written.getValue(BlockStateProperties.WATERLOGGED)) {
+        if (written == null || !written.is(JeiAutoTestInteractions.OFFSET_CONDITION)
+                || !written.hasProperty(BlockStateProperties.WATERLOGGED) || !written.getValue(BlockStateProperties.WATERLOGGED)) {
             LOGGER.error("Smoke test expected {} to write a waterlogged {} at {}, found {}",
                     recipe.id(), BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OFFSET_CONDITION),
                     Texts.offset(recipe.neighborOffset()).getString(), written);
@@ -1038,6 +1036,62 @@ public final class JeiAutoTest {
         }
         LOGGER.info("Smoke test blockless {} (from {}): output type {}, {} listed ingredient(s), the focus finds {} recipe(s), tooltip {}",
                 recipe.id(), recipe.owner(), shown.getType().getUid(), listed, focused.size(), tooltip);
+    }
+
+    /** The dev fluid waterlogs blocks below it; none of that is a recipe. */
+    private static void checkWaterlog(List<FluidInteractionRecipe> found) {
+        List<String> offenders = new ArrayList<>();
+        for (FluidInteractionRecipe recipe : found) {
+            recipe.results().forEach((offset, result) -> {
+                if (placedAt(recipe, offset).stream().anyMatch(placed -> onlyFluidDiffers(placed, result))) {
+                    offenders.add(recipe.id() + " " + Texts.offset(offset).getString() + " " + result);
+                }
+            });
+        }
+        Fluid brine = JeiAutoTestFluids.sourceFluid();
+        String brineIds = "spread/" + RecipeIds.keyOf(brine.getFluidType()).toString().replace(':', '/') + "/";
+        List<String> brineRecipes = found.stream()
+                .filter(recipe -> recipe.id().getPath().startsWith(brineIds))
+                .map(recipe -> recipe.id().toString())
+                .toList();
+        if (!offenders.isEmpty()) {
+            LOGGER.error("Smoke test found {} recipe result(s) that differ from the placed block only in their fluid: {}",
+                    offenders.size(), offenders);
+        }
+        if (brineRecipes.size() != 1) {
+            LOGGER.error("Smoke test expected one spread recipe of {}, the {} recipe, found {}: {}",
+                    BuiltInRegistries.FLUID.getKey(brine), BuiltInRegistries.BLOCK.getKey(JeiAutoTestFluids.RESULT),
+                    brineRecipes.size(), brineRecipes);
+        }
+        LOGGER.info("Smoke test waterlog: {} offender(s), {} spread recipe(s) of {}: {}", offenders.size(), brineRecipes.size(),
+                BuiltInRegistries.FLUID.getKey(brine), brineRecipes);
+    }
+
+    /** The block states a recipe places at one offset, over all alternatives. */
+    private static List<BlockState> placedAt(FluidInteractionRecipe recipe, BlockPos offset) {
+        if (offset.equals(BlockPos.ZERO)) {
+            return recipe.sources().stream().map(FluidState::createLegacyBlock).toList();
+        }
+        if (offset.equals(recipe.neighborOffset())) {
+            return recipe.neighbors().stream().map(Placement::block).toList();
+        }
+        Placement condition = recipe.conditions().get(offset);
+        return condition != null ? List.of(condition.block()) : List.of();
+    }
+
+    /** Same block; each changed property is WATERLOGGED or alone changes the fluid. */
+    private static boolean onlyFluidDiffers(BlockState placed, BlockState result) {
+        if (placed.getBlock() != result.getBlock() || placed.equals(result)) {
+            return false;
+        }
+        return placed.getProperties().stream()
+                .filter(property -> !placed.getValue(property).equals(result.getValue(property)))
+                .filter(property -> property != BlockStateProperties.WATERLOGGED)
+                .noneMatch(property -> withValue(placed, result, property).getFluidState().equals(placed.getFluidState()));
+    }
+
+    private static <T extends Comparable<T>> BlockState withValue(BlockState placed, BlockState result, Property<T> property) {
+        return placed.setValue(property, result.getValue(property));
     }
 
     private static String failureText(FluidInteractionRecipe recipe) {

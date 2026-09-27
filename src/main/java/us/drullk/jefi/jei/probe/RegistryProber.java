@@ -20,6 +20,7 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
@@ -37,7 +38,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * the predicate read a new position stays, because short-circuit evaluation shows that an earlier clause passed.
  *
  * <p>A hit is the arrangement and the writes of the interaction itself. Writes from the predicate count too,
- * because some mods do the work there and register an empty action. {@link Settler} builds every hit with the
+ * because some mods do the work there and register an empty action. A write that changes only the fluid a
+ * block holds is not part of a hit ({@link Settler#onlyFluidDiffers}). {@link Settler} builds every hit with the
  * semantics of a level. A different rule can pre-empt every arrangement of an interaction. That interaction
  * becomes a failure recipe that states the observation ({@link Texts#preempted}). An interaction that never
  * fires, or whose arrangements settle without a result, becomes an "Unable to process" failure recipe.
@@ -63,6 +65,7 @@ final class RegistryProber {
     private final Candidates candidates;
     private int skippedRuns;
     private int shortlisted;
+    private int fluidOnlyHits;
     /** The watchdog reads this from a different thread. */
     private volatile int runs;
 
@@ -148,6 +151,11 @@ final class RegistryProber {
         return shortlisted;
     }
 
+    /** Predicate passes whose every write changes only the fluid a block holds. */
+    int fluidOnlyHits() {
+        return fluidOnlyHits;
+    }
+
     /** Predicate runs so far. */
     int runs() {
         return runs;
@@ -212,7 +220,20 @@ final class RegistryProber {
         if (writes.isEmpty()) {
             return Optional.empty();
         }
+        writes.entrySet().removeIf(write -> Settler.onlyFluidDiffers(placedAt(write.getKey(), source, requirements), write.getValue()));
+        if (writes.isEmpty()) {
+            fluidOnlyHits++;
+            return Optional.empty();
+        }
         return Optional.of(new Hit(new LinkedHashMap<>(requirements), writes, wroteFromPredicate));
+    }
+
+    private static BlockState placedAt(BlockPos pos, FluidState source, Map<BlockPos, Placement> requirements) {
+        if (pos.equals(SandboxLevel.ORIGIN)) {
+            return source.createLegacyBlock();
+        }
+        Placement placement = requirements.get(pos);
+        return placement != null ? placement.block() : Blocks.AIR.defaultBlockState();
     }
 
     /**

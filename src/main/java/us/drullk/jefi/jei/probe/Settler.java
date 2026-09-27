@@ -20,6 +20,8 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 
@@ -46,8 +48,8 @@ import net.minecraft.world.level.material.FluidState;
  *
  * <p>The answer is the diff over the content positions and the positions the rule wrote in. Fixtures and the
  * positions the fluids flowed to are not part of the question. A position is a result only when its final state
- * is not air. The state must also be different from what the arrangement placed there. It must also not be a
- * state of a fluid the arrangement itself poured.
+ * is not air. The state must also be different from what the arrangement placed there, in more than the fluid
+ * it holds ({@link #onlyFluidDiffers}). It must also not be a state of a fluid the arrangement itself poured.
  */
 public final class Settler {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -191,7 +193,7 @@ public final class Settler {
         for (BlockPos offset : domain) {
             BlockState found = stateAt(offset);
             Placement placement = rest.placed().get(offset);
-            if (found.isAir() || (placement != null && found.equals(placement.block()))) {
+            if (found.isAir() || (placement != null && (found.equals(placement.block()) || onlyFluidDiffers(placement.block(), found)))) {
                 continue;
             }
             FluidState fluid = found.getFluidState();
@@ -201,6 +203,26 @@ public final class Settler {
             results.put(offset, found);
         }
         return Collections.unmodifiableMap(new LinkedHashMap<>(results));
+    }
+
+    /** Same block; each changed property is WATERLOGGED or alone changes the fluid. */
+    static boolean onlyFluidDiffers(BlockState placed, BlockState found) {
+        if (placed.getBlock() != found.getBlock() || placed.equals(found)) {
+            return false;
+        }
+        FluidState fluid = placed.getFluidState();
+        for (Property<?> property : placed.getProperties()) {
+            if (!placed.getValue(property).equals(found.getValue(property))
+                    && property != BlockStateProperties.WATERLOGGED
+                    && withValue(placed, found, property).getFluidState().equals(fluid)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static <T extends Comparable<T>> BlockState withValue(BlockState placed, BlockState found, Property<T> property) {
+        return placed.setValue(property, found.getValue(property));
     }
 
     /** What stands where the rule wrote, when that is not what the rule wrote, or null when every write survived. */

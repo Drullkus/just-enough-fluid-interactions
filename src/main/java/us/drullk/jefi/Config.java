@@ -21,6 +21,10 @@ public final class Config {
             .comment("The probe hides the recipes of the interactions from these mod ids.")
             .defineListAllowEmpty("ignoredMods", List.of(), () -> "", Config::isPlausibleModId);
 
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> IGNORED_FLUIDS = BUILDER
+            .comment("The probe skips these fluid ids and their other forms, as a source and as a neighbor.")
+            .defineListAllowEmpty("ignoredFluids", List.of("fun_fluids:flood"), () -> "", Config::isPlausibleFluidId);
+
     public static final ModConfigSpec.IntValue PROBE_THREADS = BUILDER
             .comment("The number of threads that probe the fluid interactions when JEI starts.",
                     "Value 0 uses all processors but one, up to 8. The value 1 uses one thread.",

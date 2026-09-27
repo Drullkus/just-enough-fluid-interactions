@@ -2,16 +2,20 @@ package us.drullk.jefi.jei.probe;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
-
-import net.minecraft.core.registries.BuiltInRegistries;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.Config;
 import com.mojang.logging.LogUtils;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.LiquidBlockContainer;
@@ -25,9 +29,9 @@ import net.neoforged.neoforge.fluids.FluidType;
 /**
  * What the tiers put beside a source: every fluid a level can hold, and the default state of every block.
  *
- * <p>A fluid without a block of its own is in no list ({@link FluidBlocks#hasBlock}). A liquid block is in no
- * block list. A block that holds a fluid state is in no block list. The fluids are the candidates for those
- * positions.
+ * <p>A fluid without a block of its own is in no list ({@link FluidBlocks#hasBlock}). A fluid the config ignores
+ * is in no list. A liquid block is in no block list. A block that holds a fluid state is in no block list. The
+ * fluids are the candidates for those positions.
  */
 final class Candidates {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -43,13 +47,17 @@ final class Candidates {
     final List<Placement> stillFluidsAndBlocks;
     /** The states a tier probes as the source, per type: each still fluid with a block, then its full flowing form. */
     private final Map<FluidType, List<FluidState>> sourcesByType = new HashMap<>();
+    /** The types of the fluids the config ignores. */
+    private final Set<FluidType> ignoredTypes = new HashSet<>();
 
     Candidates() {
+        Set<Fluid> ignored = ignoredFluids();
+        ignored.forEach(fluid -> ignoredTypes.add(fluid.getFluidType()));
         List<Placement> fluids = new ArrayList<>();
         List<Placement> stillFluids = new ArrayList<>();
         for (Fluid fluid : BuiltInRegistries.FLUID) {
             FluidState still = fluid.defaultFluidState();
-            if (fluid == Fluids.EMPTY || !still.isSource() || !FluidBlocks.hasBlock(fluid)) {
+            if (fluid == Fluids.EMPTY || !still.isSource() || !FluidBlocks.hasBlock(fluid) || ignored.contains(fluid)) {
                 continue;
             }
             Placement source = Placement.ofFluid(still);
@@ -82,6 +90,36 @@ final class Candidates {
         this.stillFluidsAndBlocks = List.copyOf(search);
         LOGGER.debug("Fluid spread candidates: {} fluid state(s) and {} of {} block state(s) a fluid can enter",
                 this.fluids.size(), reachableBlocks.size(), this.blocks.size());
+    }
+
+    /** Every fluid the config lists, and every fluid that {@code isSame} with one. */
+    private static Set<Fluid> ignoredFluids() {
+        List<Fluid> listed = new ArrayList<>();
+        for (String id : Config.IGNORED_FLUIDS.get()) {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            Fluid fluid = key != null ? BuiltInRegistries.FLUID.get(key) : Fluids.EMPTY;
+            if (fluid == Fluids.EMPTY) {
+                LOGGER.debug("The config ignores fluid {}, which is not registered", id);
+            } else {
+                listed.add(fluid);
+            }
+        }
+        Set<Fluid> ignored = new LinkedHashSet<>();
+        for (Fluid fluid : BuiltInRegistries.FLUID) {
+            if (fluid != Fluids.EMPTY && listed.stream().anyMatch(fluid::isSame)) {
+                ignored.add(fluid);
+            }
+        }
+        if (!ignored.isEmpty()) {
+            LOGGER.debug("The config ignores {} fluid(s): {}", ignored.size(),
+                    ignored.stream().map(BuiltInRegistries.FLUID::getKey).toList());
+        }
+        return ignored;
+    }
+
+    /** Whether the config ignores every fluid of the type that the probe can place. */
+    boolean ignores(FluidType type) {
+        return ignoredTypes.contains(type) && sourceStates(type).isEmpty();
     }
 
     private static boolean canHoldFluid(Placement placement) {
