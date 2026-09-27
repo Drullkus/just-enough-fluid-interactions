@@ -45,7 +45,9 @@ public final class Config {
             .defineListAllowEmpty("mergeAcrossMods", List.of(
                     "minecraft:basalt",
                     "minecraft:cobblestone",
+                    "minecraft:end_stone",
                     "minecraft:obsidian",
+                    "minecraft:stone",
                     "biomesoplenty:flesh",
                     "biomesoplenty:porous_flesh",
                     "biomesoplenty:null_block"
