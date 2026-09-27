@@ -11,6 +11,7 @@ import us.drullk.jefi.Config;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.InteractionProber;
+import us.drullk.jefi.jei.probe.RecipeMerger;
 import us.drullk.jefi.jei.scene.SceneCache;
 import com.mojang.logging.LogUtils;
 
@@ -73,7 +74,7 @@ public final class FluidInteractionsJeiPlugin implements IModPlugin {
             return;
         }
         List<FluidInteractionRecipe> recipes = new InteractionProber(level.registryAccess()).probeAll();
-        registration.addRecipes(TYPE, filter(recipes));
+        registration.addRecipes(TYPE, RecipeMerger.merge(filter(recipes)));
     }
 
     private static List<FluidInteractionRecipe> filter(List<FluidInteractionRecipe> recipes) {

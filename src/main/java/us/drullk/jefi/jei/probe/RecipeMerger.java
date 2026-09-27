@@ -1,7 +1,9 @@
 package us.drullk.jefi.jei.probe;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -12,9 +14,12 @@ import java.util.function.Function;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.Config;
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.fluids.FluidType;
@@ -26,10 +31,11 @@ import net.neoforged.neoforge.fluids.FluidType;
  *
  * <p>Two passes run over the recipe list in probe order. The first pass merges recipes of one source type whose
  * neighbor position, conditions, results, source forms and owner match. It unions their neighbor alternatives.
- * The second pass merges recipes of any source type whose neighbor alternatives, neighbor position, conditions,
- * results, source forms and owner match. It unions their source states. Neighbor alternatives compare by block
- * state and still fluid, plus the forms each one matched in. So the exact flowing state a probe recorded never
- * decides a merge. Failure recipes never merge.
+ * The second pass merges recipes of any source type whose neighbor alternatives, neighbor position,
+ * conditions, results, source forms and owner match. It unions their source states. In both passes, a recipe
+ * whose every result block is in {@code mergeAcrossMods} matches on its neighbor kinds, fluid or block, and not
+ * on its owner. A merge of several owners has no owner and a {@code merged} id. Neighbor alternatives compare by block state and still fluid, plus the forms each one matched in. So
+ * the exact flowing state a probe recorded never decides a merge. Failure recipes never merge.
  *
  * <p>A merged recipe keeps the id and source type of its first member in probe order. Probe order ranks the
  * source fluid type by namespace, and then by path. The namespace rank is {@code minecraft}, then
@@ -47,19 +53,48 @@ public final class RecipeMerger {
 
     private static final int FORM_SOURCE = 0b01;
     private static final int FORM_FLOWING = 0b10;
+    private static final int KIND_FLUID = 0b01;
+    private static final int KIND_BLOCK = 0b10;
+    private static final String MERGED = "merged";
+
+    /** Orders the keys of merges with several owners by values that no installed mod changes. */
+    private static final Comparator<Key> ACROSS_MODS_ORDER = Comparator.comparing(RecipeMerger::resultKeys)
+            .thenComparingInt(key -> ((AcrossMods) key.owner()).neighborKinds())
+            .thenComparingInt(Key::forms)
+            .thenComparing(Key::neighborOffset)
+            .thenComparing(RecipeMerger::conditionKeys)
+            .thenComparing(RecipeMerger::resultStates)
+            .thenComparing(RecipeMerger::neighborKeys);
 
     private RecipeMerger() {
     }
 
+    /** Merges with the config's {@code mergeAcrossMods}. */
     public static List<FluidInteractionRecipe> merge(List<FluidInteractionRecipe> recipes) {
-        List<FluidInteractionRecipe> merged = pass(pass(recipes, RecipeMerger::withinType), RecipeMerger::acrossTypes);
+        return merge(recipes, blockIds(Config.MERGE_ACROSS_MODS.get()));
+    }
+
+    /** @param acrossMods the result blocks whose recipes merge without their owner. */
+    public static List<FluidInteractionRecipe> merge(List<FluidInteractionRecipe> recipes, Set<ResourceLocation> acrossMods) {
+        List<FluidInteractionRecipe> merged = pass(pass(recipes, recipe -> withinType(recipe, acrossMods)), recipe -> acrossTypes(recipe, acrossMods));
         LOGGER.info("Merged {} fluid interaction recipe(s) into {}", recipes.size(), merged.size());
         return merged;
     }
 
-    private static List<FluidInteractionRecipe> pass(List<FluidInteractionRecipe> recipes, Function<FluidInteractionRecipe, Object> key) {
+    private static Set<ResourceLocation> blockIds(List<? extends String> ids) {
+        Set<ResourceLocation> blocks = new HashSet<>();
+        for (String id : ids) {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key != null) {
+                blocks.add(key);
+            }
+        }
+        return blocks;
+    }
+
+    private static List<FluidInteractionRecipe> pass(List<FluidInteractionRecipe> recipes, Function<FluidInteractionRecipe, Key> key) {
         List<Merge> merges = new ArrayList<>();
-        Map<Object, Merge> byKey = new HashMap<>();
+        Map<Key, Merge> byKey = new HashMap<>();
         for (FluidInteractionRecipe recipe : recipes) {
             if (recipe.isFailure()) {
                 merges.add(new Merge(recipe));
@@ -74,19 +109,120 @@ public final class RecipeMerger {
             merges.add(merge);
             byKey.put(key.apply(recipe), merge);
         }
+        Map<Merge, ResourceLocation> ids = mergedIds(byKey);
         List<FluidInteractionRecipe> result = new ArrayList<>(merges.size());
         for (Merge merge : merges) {
-            result.add(merge.build());
+            result.add(merge.build(ids.get(merge)));
         }
         return result;
     }
 
-    private static Object withinType(FluidInteractionRecipe recipe) {
-        return new WithinType(recipe.sourceType(), recipe.owner(), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
+    /**
+     * The {@code merged} ids of the merges with several owners, in {@link #ACROSS_MODS_ORDER}. Within one type,
+     * {@code n} counts the result blocks. Across types, the first result block names the merge. {@code variant}
+     * counts the rest of the key.
+     */
+    private static Map<Merge, ResourceLocation> mergedIds(Map<Key, Merge> byKey) {
+        Map<List<Object>, List<Map.Entry<Key, Merge>>> groups = new HashMap<>();
+        byKey.forEach((key, merge) -> {
+            if (key.owner() instanceof AcrossMods && merge.owners.size() > 1) {
+                Object scope = key instanceof WithinType within ? within.sourceType() : firstResult(key);
+                groups.computeIfAbsent(List.of(tier(merge.first.id()), scope), k -> new ArrayList<>()).add(Map.entry(key, merge));
+            }
+        });
+        Map<Merge, ResourceLocation> ids = new HashMap<>();
+        groups.forEach((scope, entries) -> {
+            entries.sort(Map.Entry.comparingByKey(ACROSS_MODS_ORDER));
+            String tier = (String) scope.get(0);
+            int n = -1;
+            int variant = 0;
+            String results = null;
+            for (Map.Entry<Key, Merge> entry : entries) {
+                String next = resultKeys(entry.getKey());
+                if (entry.getKey() instanceof WithinType within) {
+                    if (!next.equals(results)) {
+                        results = next;
+                        n++;
+                        variant = 0;
+                    }
+                    ids.put(entry.getValue(), RecipeIds.id(tier, RecipeIds.keyOf(within.sourceType()), MERGED, n, variant++));
+                } else {
+                    ids.put(entry.getValue(), RecipeIds.mergedId(tier, (ResourceLocation) scope.get(1), variant++));
+                }
+            }
+        });
+        return ids;
     }
 
-    private static Object acrossTypes(FluidInteractionRecipe recipe) {
-        return new AcrossTypes(neighborForms(recipe), recipe.owner(), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
+    /** The block key of the first result in offset order. */
+    private static ResourceLocation firstResult(Key key) {
+        return key.results().entrySet().stream()
+                .min(Map.Entry.comparingByKey())
+                .map(entry -> BuiltInRegistries.BLOCK.getKey(entry.getValue().getBlock()))
+                .orElseThrow();
+    }
+
+    /** The tier segment of an id: empty, {@code spread/} or {@code neighbor/}. */
+    private static String tier(ResourceLocation id) {
+        String path = id.getPath();
+        return path.startsWith("spread/") ? "spread/" : path.startsWith("neighbor/") ? "neighbor/" : "";
+    }
+
+    private static String resultKeys(Key key) {
+        return offsetKeys(key.results().entrySet().stream()
+                .map(entry -> Map.entry(entry.getKey(), String.valueOf(BuiltInRegistries.BLOCK.getKey(entry.getValue().getBlock()))))
+                .toList());
+    }
+
+    private static String resultStates(Key key) {
+        return offsetKeys(key.results().entrySet().stream().map(entry -> Map.entry(entry.getKey(), entry.getValue().toString())).toList());
+    }
+
+    private static String conditionKeys(Key key) {
+        return offsetKeys(key.conditions().entrySet().stream()
+                .map(entry -> Map.entry(entry.getKey(), entry.getValue().block() + "/" + entry.getValue().effectiveFluid()))
+                .toList());
+    }
+
+    private static String neighborKeys(Key key) {
+        return key instanceof AcrossTypes across
+                ? across.neighbors().stream().map(neighbor -> neighbor.neighbor().block() + "/" + neighbor.neighbor().effectiveFluid()
+                        + "/" + neighbor.forms()).sorted().toList().toString()
+                : "";
+    }
+
+    private static String offsetKeys(List<Map.Entry<BlockPos, String>> entries) {
+        return entries.stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue())
+                .toList()
+                .toString();
+    }
+
+    private static Key withinType(FluidInteractionRecipe recipe, Set<ResourceLocation> acrossMods) {
+        return new WithinType(recipe.sourceType(), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
+    }
+
+    /** The owner, or the neighbor kinds when every result block merges across mods. */
+    private static @Nullable Object ownerKey(FluidInteractionRecipe recipe, Set<ResourceLocation> acrossMods) {
+        if (!recipe.results().isEmpty() && recipe.results().values().stream()
+                .allMatch(state -> acrossMods.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock())))) {
+            return new AcrossMods(neighborKinds(recipe));
+        }
+        return recipe.owner();
+    }
+
+    /** Whether the neighbor alternatives hold fluids, blocks or both, as a bit mask. */
+    private static int neighborKinds(FluidInteractionRecipe recipe) {
+        int kinds = 0;
+        for (Placement neighbor : recipe.neighbors()) {
+            kinds |= neighbor.isFluid() ? KIND_FLUID : KIND_BLOCK;
+        }
+        return kinds;
+    }
+
+    private static Key acrossTypes(FluidInteractionRecipe recipe, Set<ResourceLocation> acrossMods) {
+        return new AcrossTypes(neighborForms(recipe), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
     }
 
     /** Which forms the source matched in, as a bit mask. A still-only pattern thus never merges with a flowing one. */
@@ -118,12 +254,29 @@ public final class RecipeMerger {
         return Placement.ofFluid(FluidInteractionRecipe.stillForm(placement.effectiveFluid()).defaultFluidState());
     }
 
-    private record WithinType(FluidType sourceType, @Nullable String owner, BlockPos neighborOffset,
-                              Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) {
+    /** The parts every merge key holds. */
+    private sealed interface Key permits WithinType, AcrossTypes {
+        @Nullable Object owner();
+
+        BlockPos neighborOffset();
+
+        Map<BlockPos, Placement> conditions();
+
+        Map<BlockPos, BlockState> results();
+
+        int forms();
     }
 
-    private record AcrossTypes(Set<NeighborForms> neighbors, @Nullable String owner, BlockPos neighborOffset,
-                               Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) {
+    private record WithinType(FluidType sourceType, @Nullable Object owner, BlockPos neighborOffset,
+                              Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) implements Key {
+    }
+
+    private record AcrossTypes(Set<NeighborForms> neighbors, @Nullable Object owner, BlockPos neighborOffset,
+                               Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results, int forms) implements Key {
+    }
+
+    /** The owner part of a key that matches recipes of every mod. */
+    private record AcrossMods(int neighborKinds) {
     }
 
     /** One neighbor alternative in its still form, with the forms it matched in as a bit mask. */
@@ -137,6 +290,7 @@ public final class RecipeMerger {
         private final Set<Placement> neighbors = new LinkedHashSet<>();
         private final Set<FluidState> inertSources = new LinkedHashSet<>();
         private final Set<Placement> inertNeighbors = new LinkedHashSet<>();
+        private final Set<@Nullable String> owners = new HashSet<>();
         private int members;
 
         Merge(FluidInteractionRecipe recipe) {
@@ -149,19 +303,24 @@ public final class RecipeMerger {
             neighbors.addAll(recipe.neighbors());
             inertSources.addAll(recipe.inert().sources());
             inertNeighbors.addAll(recipe.inert().neighbors());
+            owners.add(recipe.owner());
             members++;
         }
 
-        /** A form another member matched is not inert, so the union of the members drops it again. */
-        FluidInteractionRecipe build() {
+        /**
+         * A form another member matched is not inert, so the union of the members drops it again.
+         *
+         * @param mergedId the id of a merge with several owners, which then has no owner.
+         */
+        FluidInteractionRecipe build(@Nullable ResourceLocation mergedId) {
             if (members == 1) {
                 return first;
             }
             inertSources.removeAll(sources);
             inertNeighbors.removeAll(neighbors);
-            return new FluidInteractionRecipe(first.sourceType(), first.id(),
+            return new FluidInteractionRecipe(first.sourceType(), mergedId != null ? mergedId : first.id(),
                     List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
-                    first.conditions(), first.results(), null, first.owner(),
+                    first.conditions(), first.results(), null, mergedId != null ? null : first.owner(),
                     new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)));
         }
     }

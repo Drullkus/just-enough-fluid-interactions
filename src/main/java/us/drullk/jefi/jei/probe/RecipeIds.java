@@ -75,6 +75,12 @@ public final class RecipeIds {
                 tier + typeKey.getNamespace() + "/" + typeKey.getPath() + "/" + ownerSegment + "/" + n + "/" + variant);
     }
 
+    /** The id of a merge across source types and owners, named by its first result block. */
+    static ResourceLocation mergedId(String tier, ResourceLocation result, int variant) {
+        return ResourceLocation.fromNamespaceAndPath(JustEnoughFluidInteractions.MODID,
+                tier + "merged/" + result.getNamespace() + "/" + result.getPath() + "/" + variant);
+    }
+
     private static int namespaceRank(String namespace) {
         if (MINECRAFT.equals(namespace)) {
             return 0;

@@ -50,8 +50,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * tier fails on the pool, the probe continues on one thread. The config can also set one thread from the start.
  *
  * <p>The tiers can propose the same physical arrangement. {@link #arrangementKey} keeps the first tier's recipe:
- * the registry, then the neighbor tier, then the spread tier. {@link RecipeMerger} then collapses recipes that
- * describe one pattern. {@link #byOwner} sets the display order.
+ * the registry, then the neighbor tier, then the spread tier. {@link #byOwner} sets the display order. The
+ * caller merges the recipes with {@link RecipeMerger}.
  */
 public final class InteractionProber {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -114,14 +114,13 @@ public final class InteractionProber {
             recipes.addAll(byOwner(registry.recipes().getOrDefault(type, List.of()),
                     fromSpread.getOrDefault(type, List.of()), fromNeighbors.getOrDefault(type, List.of())));
         }
-        List<FluidInteractionRecipe> merged = RecipeMerger.merge(recipes);
         LOGGER.info("Probed fluid spread of {} fluid type(s) into {} JEI recipe(s) in {} ms",
                 types.size(), count(fromSpread), spread.millis());
         LOGGER.info("Probed fluid neighbors of {} fluid type(s) into {} JEI recipe(s) in {} ms",
                 types.size(), count(fromNeighbors), neighbors.millis());
-        LOGGER.info("Probed {} fluid interaction(s) into {} JEI recipe(s) in {} ms",
-                registry.count(), merged.size(), registry.millis() + spread.millis() + neighbors.millis());
-        return merged;
+        LOGGER.info("Probed {} fluid interaction(s) into {} recipe(s) before the merge in {} ms",
+                registry.count(), recipes.size(), registry.millis() + spread.millis() + neighbors.millis());
+        return recipes;
     }
 
     /**

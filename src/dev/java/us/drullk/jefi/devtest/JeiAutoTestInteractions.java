@@ -25,7 +25,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  * interaction is registered on a water-tagged fluid for a lava neighbor. A level runs it before lava's spread
  * tick, so settling leaves that fluid out of vanilla's stone recipe. One interaction is registered on lava for
  * a water neighbor. A level answers it with the interaction registered before it. One interaction writes a
- * block without an item.
+ * block without an item. One interaction writes obsidian from a lava source beside a block.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -49,6 +49,9 @@ public final class JeiAutoTestInteractions {
     static final Block OFFSET_CONDITION = Blocks.POINTED_DRIPSTONE;
     /** The neighbor the dev fluid turns into a waterlogged {@link #OFFSET_CONDITION}. */
     static final Block OFFSET_TRIGGER = Blocks.DRIPSTONE_BLOCK;
+
+    /** A lava source beside this block becomes obsidian. */
+    static final Block OBSIDIAN_BLOCK_NEIGHBOR = Blocks.SNOW_BLOCK;
 
     /** The neighbor of a water source that writes {@link #ITEMLESS_RESULT}. */
     static final Block ITEMLESS_NEIGHBOR = Blocks.FLOWER_POT;
@@ -109,6 +112,10 @@ public final class JeiAutoTestInteractions {
             FluidInteractionRegistry.addInteraction(NeoForgeMod.WATER_TYPE.value(), new InteractionInformation(
                     (level, pos, relativePos, state) -> state.isSource() && level.getBlockState(relativePos).is(ITEMLESS_NEIGHBOR),
                     ITEMLESS_RESULT.defaultBlockState()));
+            // A lava source beside a snow block becomes obsidian.
+            FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
+                    (level, pos, relativePos, state) -> state.isSource() && level.getBlockState(relativePos).is(OBSIDIAN_BLOCK_NEIGHBOR),
+                    Blocks.OBSIDIAN.defaultBlockState()));
             // This interaction is for lava with water beside it. The interaction registered on lava before this
             // one answers first, so every arrangement settles as that one's result. This one's failure recipe
             // states what stands there instead.

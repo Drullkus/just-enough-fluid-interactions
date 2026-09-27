@@ -8,7 +8,7 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 /** Client-side config governing which fluid interaction recipes JEI displays. */
 public final class Config {
     private static final Pattern MOD_ID_PATTERN = Pattern.compile("[a-z0-9_.-]+");
-    private static final Pattern FLUID_ID_PATTERN = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
+    private static final Pattern ID_PATTERN = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
 
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
@@ -23,7 +23,7 @@ public final class Config {
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> IGNORED_FLUIDS = BUILDER
             .comment("The probe skips these fluid ids and their other forms, as a source and as a neighbor.")
-            .defineListAllowEmpty("ignoredFluids", List.of("fun_fluids:flood"), () -> "", Config::isPlausibleFluidId);
+            .defineListAllowEmpty("ignoredFluids", List.of("fun_fluids:flood"), () -> "", Config::isPlausibleId);
 
     public static final ModConfigSpec.IntValue PROBE_THREADS = BUILDER
             .comment("The number of threads that probe the fluid interactions when JEI starts.",
@@ -38,7 +38,18 @@ public final class Config {
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_PROBE = BUILDER
             .comment("The probe probes these fluid ids in every tier, also when their classes declare no code of their own.")
-            .defineListAllowEmpty("forceProbe", List.of(), () -> "", Config::isPlausibleFluidId);
+            .defineListAllowEmpty("forceProbe", List.of(), () -> "", Config::isPlausibleId);
+
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> MERGE_ACROSS_MODS = BUILDER
+            .comment("Merge these blocks if their formation are the same.")
+            .defineListAllowEmpty("mergeAcrossMods", List.of(
+                    "minecraft:basalt",
+                    "minecraft:cobblestone",
+                    "minecraft:obsidian",
+                    "biomesoplenty:flesh",
+                    "biomesoplenty:porous_flesh",
+                    "biomesoplenty:null_block"
+            ), () -> "", Config::isPlausibleId);
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -49,7 +60,7 @@ public final class Config {
         return value instanceof String string && MOD_ID_PATTERN.matcher(string).matches();
     }
 
-    private static boolean isPlausibleFluidId(Object value) {
-        return value instanceof String string && FLUID_ID_PATTERN.matcher(string).matches();
+    private static boolean isPlausibleId(Object value) {
+        return value instanceof String string && ID_PATTERN.matcher(string).matches();
     }
 }

@@ -17,6 +17,7 @@ import java.util.stream.Stream;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+import us.drullk.jefi.Config;
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.InertFormIndicator;
@@ -198,6 +199,7 @@ public final class JeiAutoTest {
         }
         checkAlternatives(recipes);
         checkMerging(recipes);
+        checkMergedAcrossMods(recipes);
         checkFlowingNeighbor(recipes);
         checkSpreadRecipe(recipes);
         checkOwnerOrder(recipes);
@@ -212,6 +214,7 @@ public final class JeiAutoTest {
         checkPreemptedThirdPartyInteraction(recipes);
         checkBlockless(recipes);
         checkWaterlog(recipes);
+        logInventory(recipes, List.of("alltheores", "colouredstuff", "create_dragons_plus", "mingle"));
         logRecipeIds(recipes);
         runtime.getRecipesGui().showTypes(List.of(FluidInteractionsJeiPlugin.TYPE));
     }
@@ -375,6 +378,52 @@ public final class JeiAutoTest {
                 LOGGER.error("Smoke test merged recipe {} is missing neighbor alternative {}", merged.id(), BuiltInRegistries.BLOCK.getKey(neighbor));
             }
         }
+    }
+
+    /** The obsidian recipes of fluid neighbors merge across mods. A block neighbor stays apart. */
+    private static void checkMergedAcrossMods(List<FluidInteractionRecipe> found) {
+        Map<BlockPos, BlockState> obsidian = Map.of(BlockPos.ZERO, Blocks.OBSIDIAN.defaultBlockState());
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> LAVA_TYPE.equals(RecipeIds.keyOf(recipe.sourceType())))
+                .filter(recipe -> obsidian.equals(recipe.results()) && recipe.conditions().isEmpty())
+                .filter(recipe -> recipe.neighborOffset().equals(FluidInteractionRecipe.NEIGHBOR_OFFSET))
+                .filter(recipe -> recipe.matchesSourceForm() && !recipe.matchesFlowingForm())
+                .toList();
+        List<FluidInteractionRecipe> fluids = matches.stream()
+                .filter(recipe -> recipe.neighbors().stream().allMatch(Placement::isFluid))
+                .toList();
+        List<FluidInteractionRecipe> blocks = matches.stream()
+                .filter(recipe -> recipe.neighbors().stream().noneMatch(Placement::isFluid))
+                .toList();
+        if (fluids.size() != 1 || blocks.size() != 1 || matches.size() != 2) {
+            LOGGER.error("Smoke test expected one obsidian recipe of lava beside fluids and one beside blocks, found {} and {} of {}: {}",
+                    fluids.size(), blocks.size(), matches.size(), matches.stream().map(recipe -> recipe.id().toString()).toList());
+            return;
+        }
+        FluidInteractionRecipe merged = fluids.getFirst();
+        Set<String> namespaces = merged.neighbors().stream()
+                .map(placement -> BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(placement.effectiveFluid())).getNamespace())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (namespaces.size() < 2) {
+            LOGGER.error("Smoke test expected the obsidian recipe {} to hold the fluids of several mods, found {}", merged.id(), namespaces);
+        }
+        if (!merged.id().getPath().equals("minecraft/lava/merged/0/0") || merged.owner() != null) {
+            LOGGER.error("Smoke test expected the obsidian recipe {} (from {}) to have the id minecraft/lava/merged/0/0 and no owner",
+                    merged.id(), merged.owner());
+        }
+        FluidInteractionRecipe block = blocks.getFirst();
+        boolean snow = block.neighbors().stream().anyMatch(placement -> placement.block().is(JeiAutoTestInteractions.OBSIDIAN_BLOCK_NEIGHBOR));
+        if (!snow) {
+            LOGGER.error("Smoke test expected the obsidian recipe {} beside blocks to hold {}", block.id(),
+                    BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.OBSIDIAN_BLOCK_NEIGHBOR));
+        }
+        LOGGER.info("Smoke test merged across mods {} (from {}): {} neighbor fluid(s) from {}, apart from {} (from {}) beside {}",
+                merged.id(), merged.owner(), fluidCount(merged), namespaces,
+                block.id(), block.owner(), block.neighbors().stream().map(JeiAutoTest::alternativeKey).toList());
+    }
+
+    private static long fluidCount(FluidInteractionRecipe recipe) {
+        return recipe.neighbors().stream().map(placement -> FluidInteractionRecipe.stillForm(placement.effectiveFluid())).distinct().count();
     }
 
     /**
@@ -1107,6 +1156,36 @@ public final class JeiAutoTest {
 
     private static String blockName(ResourceLocation key) {
         return BuiltInRegistries.BLOCK.get(key).getName().getString();
+    }
+
+    /** One line per recipe that writes a block of {@code mergeAcrossMods} or comes from one of these mods. */
+    private static void logInventory(List<FluidInteractionRecipe> found, List<String> owners) {
+        List<String> blocks = List.copyOf(Config.MERGE_ACROSS_MODS.get());
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> recipe.owner() != null && owners.contains(recipe.owner())
+                        || recipe.results().values().stream().anyMatch(state -> blocks.contains(String.valueOf(resultKey(state)))))
+                .toList();
+        for (FluidInteractionRecipe recipe : matches) {
+            LOGGER.info("{} inventory {}", PREFIX, describeRecipe(recipe));
+        }
+        LOGGER.info("{} inventory: {} recipe(s) write {} or come from {}", PREFIX, matches.size(), blocks, owners);
+    }
+
+    /** The id, owner and every part of the merge key of one recipe. */
+    private static String describeRecipe(FluidInteractionRecipe recipe) {
+        String path = recipe.id().getPath();
+        String tier = path.startsWith("spread/") ? "spread" : path.startsWith("neighbor/") ? "neighbor" : "registry";
+        Set<String> kinds = recipe.neighbors().stream().map(placement -> placement.isFluid() ? "fluid" : "block")
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return recipe.id() + " (from " + recipe.owner() + ", " + tier + "): type " + RecipeIds.keyOf(recipe.sourceType())
+                + ", source " + recipe.sourceFluids().stream().map(fluid -> String.valueOf(BuiltInRegistries.FLUID.getKey(fluid))).toList()
+                + " source form " + recipe.matchesSourceForm() + " flowing form " + recipe.matchesFlowingForm()
+                + ", neighbor " + recipe.neighborOffset().toShortString() + " kinds " + kinds + " "
+                + recipe.neighbors().stream().map(JeiAutoTest::alternativeKey).toList()
+                + ", conditions " + recipe.conditions().entrySet().stream()
+                        .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue().block()).toList()
+                + ", results " + recipe.results().entrySet().stream()
+                        .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue()).toList();
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

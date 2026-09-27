@@ -146,7 +146,9 @@ Plugin code is under `us/drullk/jefi/jei/` in `probe`, `sandbox` and `scene`.
 - `assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
 - `us.drullk.jefi.Config`: the client config, file `config/justenoughfluidinteractions-client.toml`.
   - `hideUnprocessable`, `ignoredMods`: applied in `FluidInteractionsJeiPlugin.filter` after
-    the probe.
+    the probe and before the merge.
+  - `mergeAcrossMods`, default basalt, cobblestone, obsidian: recipes that make only these
+    blocks merge across mods (`RecipeMerger`).
   - `ignoredFluids`, default `fun_fluids:flood`: the probe skips each listed fluid and every
     fluid that `isSame` with it, as a source and as a candidate. An existing file keeps its value.
   - `probeThreads`, `probeStallSeconds`: size and guard the pool.
@@ -168,7 +170,9 @@ Development-only classes bound to the mod for runs, never packaged.
 - `PackRun`: clears `SharedConstants.IS_RUNNING_IN_IDE` for pack runs. NeoForge's gametest
   scan loads every mod's gametest classes in a dev run.
 - `JeiAutoTestInteractions`: the dev-only interactions. One writes a potted poppy, a block
-  without an item.
+  without an item. One makes obsidian from a lava source beside a snow block.
+- `JeiAutoTest.logInventory`: one `Smoke test inventory` line with the merge key per recipe
+  that writes a block of `mergeAcrossMods`.
 - `JeiAutoTestFluids`: two dev-only fluids. A `Fluid` claims its registry holder in its
   constructor, so they are built inside `RegisterEvent`.
   - `hardening_brine`: hardens lava-tagged fluids below it, source form only. Both forms
@@ -381,7 +385,9 @@ Development-only classes bound to the mod for runs, never packaged.
 - Formats, all with `justenoughfluidinteractions:` in front:
   - registry: `<type ns>/<type path>/<owner>/<n>/<variant>`;
   - spread: `spread/<type ns>/<type path>/<owner>/<n>/<variant>`;
-  - neighbor: `neighbor/<type ns>/<type path>/<owner>/<n>/<variant>`.
+  - neighbor: `neighbor/<type ns>/<type path>/<owner>/<n>/<variant>`;
+  - a first-pass merge of several owners: `<tier><type ns>/<type path>/merged/<n>/<variant>`;
+  - a second-pass merge of several owners: `<tier>merged/<result ns>/<result path>/<variant>`.
 - Ids stay unique and stable across launches. JEI uses them for bookmarks.
 - Types rank `minecraft`, `neoforge`, other namespaces alphabetically, then path
   (`RecipeIds.LOCATION_ORDER`, never `ResourceLocation`'s path-first order).
@@ -394,6 +400,10 @@ Development-only classes bound to the mod for runs, never packaged.
 - Display order is type, then owner rank across tiers, then registry, spread, neighbor. Ids
   are assigned before that regrouping.
 - `RecipeMerger` keeps the first member's id. It keys on the owner and the neighbor offset too.
+  - A recipe whose every result block is in `mergeAcrossMods` keys on its neighbor kinds, fluid
+    or block, in place of its owner, in both passes.
+  - The first pass keys on the source type. The second pass unions the source fluids.
+  - A merge of several owners has no owner. Its numbers count only the merges in the pack.
 
 ## Verifying changes
 
@@ -441,6 +451,8 @@ One each unless stated.
 
 - `Smoke test recipe ...` per recipe, with `0 offender(s)`.
 - `merged recipe`: both merge passes collapsed the dev-only mergeable interactions.
+- `merged across mods`: lava beside fluids of several mods is one obsidian recipe,
+  `minecraft/lava/merged/0/0`, with no owner. The snow block neighbor stays apart.
 - `flowing neighbor`: the cobblestone recipe carries a flowing water neighbor.
 - `spread recipe`: lava over water gives stone, with both water forms.
 - `order`: the stone recipe precedes every third-party lava recipe.

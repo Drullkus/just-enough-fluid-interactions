@@ -33,7 +33,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  *                       position.
  * @param failure        not null when no probe processed the interaction. The other collections are then empty.
  * @param owner          the mod id credited with the registration of the interaction, or null when nothing
- *                       identifies one.
+ *                       identifies one. Null for a merge of several owners.
  * @param inert          forms the same spread probe tries at this arrangement with no result. It is empty for
  *                       everything the registry probe finds.
  */
