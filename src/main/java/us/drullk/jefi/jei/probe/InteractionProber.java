@@ -89,6 +89,8 @@ public final class InteractionProber {
      */
     public List<FluidInteractionRecipe> probeAll() {
         Map<FluidType, List<InteractionInformation>> registered = RegisteredInteractions.get();
+        List<String> mismatched = FluidBlocks.mismatchedBlocks();
+        LOGGER.debug("Skipped {} fluid(s) whose block holds a different fluid: {}", mismatched.size(), mismatched);
         List<FluidType> types = probable(orderedTypes(registered.keySet()), registered);
         LOGGER.debug("Probing on {} thread(s)", threads);
 

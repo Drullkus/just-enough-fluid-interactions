@@ -422,7 +422,7 @@ Development-only classes bound to the mod for runs, never packaged.
   - The first two passes compare a fluid result by its still form. Members whose exact results
     differ become rows.
   - A group of more than 100 rows splits by neighbor entries, then by source fluids. Each part
-    that fits merges. JEI shows at most 100 entries per slot.
+    that fits merges. JEI cycles at most 100 entries of one slot on screen.
   - Rows drop only exact repeats.
 
 ## Verifying changes
@@ -439,6 +439,7 @@ are in `run/logs/debug.log`. An `ERROR` from a smoke-test check is a regression.
 
 ### Probe lines at debug
 
+- `Skipped N fluid(s) whose block holds a different fluid`. In dev: 0.
 - `Probing on N thread(s)`.
 - One `Probed fluid spread of <type>` and one `Probed fluid neighbors of <type>` per probed
   type, from the `jefi-probe-*` threads.
