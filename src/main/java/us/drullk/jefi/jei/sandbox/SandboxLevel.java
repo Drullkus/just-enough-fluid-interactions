@@ -23,12 +23,15 @@ import com.mojang.logging.LogUtils;
 import dev.compactmods.gander.level.VirtualLevel;
 import it.unimi.dsi.fastutil.Hash;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.util.AbortableIterationConsumer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.level.entity.LevelEntityGetter;
@@ -65,8 +68,8 @@ import net.neoforged.neoforge.client.model.data.ModelDataManager;
  *
  * <p>The level reports itself as server-side, so interactions that guard on {@code !level.isClientSide} run.
  * Block scheduled ticks need a {@code ServerLevel}, so the level only counts them. The level denies entities.
- * The level does not run random ticks. Neighbor notification skips NeoForge's {@code NeighborNotifyEvent}, so
- * no event of a mod fires while the probe runs recipes.
+ * The level does not run random ticks. Its own neighbor notification skips NeoForge's
+ * {@code NeighborNotifyEvent}. A block hook can still fire that event.
  */
 public final class SandboxLevel extends VirtualLevel {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -122,6 +125,7 @@ public final class SandboxLevel extends VirtualLevel {
     private long liveWrites;
     private long liveNeighborUpdates;
     private long liveTicks;
+    private RecipeManager emptyRecipeManager;
 
     public long liveWrites() { return liveWrites; }
     public long liveNeighborUpdates() { return liveNeighborUpdates; }
@@ -485,6 +489,19 @@ public final class SandboxLevel extends VirtualLevel {
     @Override
     public GameRules getGameRules() {
         return gameRules;
+    }
+
+    /** A mod's listener may read this from a block hook. */
+    @Override
+    public RecipeManager getRecipeManager() {
+        ClientPacketListener connection = Minecraft.getInstance().getConnection();
+        if (connection != null) {
+            return connection.getRecipeManager();
+        }
+        if (emptyRecipeManager == null) {
+            emptyRecipeManager = new RecipeManager(registryAccess());
+        }
+        return emptyRecipeManager;
     }
 
     private static GameRules noDrops() {
