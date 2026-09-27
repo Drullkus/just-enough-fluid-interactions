@@ -36,6 +36,7 @@ import net.neoforged.neoforge.fluids.FluidType;
  *                       identifies one. Null for a merge of several owners.
  * @param inert          forms the same spread probe tries at this arrangement with no result. It is empty for
  *                       everything the registry probe finds.
+ * @param rows           the rows of a recipe whose slots cycle together. Empty for every other recipe.
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -47,10 +48,17 @@ public record FluidInteractionRecipe(
         Map<BlockPos, BlockState> results,
         @Nullable Component failure,
         @Nullable String owner,
-        InertForms inert) {
+        InertForms inert,
+        List<FluidInteractionRecipe> rows) {
 
     /** The neighbor position the probe hands to registered interactions, as an offset from the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
+
+    public FluidInteractionRecipe(FluidType sourceType, ResourceLocation id, List<FluidState> sources, List<Placement> neighbors,
+                                  BlockPos neighborOffset, Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results,
+                                  @Nullable Component failure, @Nullable String owner, InertForms inert) {
+        this(sourceType, id, sources, neighbors, neighborOffset, conditions, results, failure, owner, inert, List.of());
+    }
 
     public static FluidInteractionRecipe failed(FluidType type, ResourceLocation id, Component reason, @Nullable String owner) {
         return new FluidInteractionRecipe(type, id, List.of(), List.of(), NEIGHBOR_OFFSET, Map.of(), Map.of(), reason, owner, InertForms.NONE);
@@ -58,6 +66,30 @@ public record FluidInteractionRecipe(
 
     public boolean isFailure() {
         return failure != null;
+    }
+
+    public boolean isLockstep() {
+        return !rows.isEmpty();
+    }
+
+    /** The rows of a lockstep recipe, or this recipe alone. */
+    public List<FluidInteractionRecipe> rowsOrSelf() {
+        return rows.isEmpty() ? List.of(this) : rows;
+    }
+
+    /** The distinct entries the neighbor slot shows, in order. */
+    public List<Object> neighborEntries() {
+        return neighbors.stream().map(Placement::slotEntry).distinct().toList();
+    }
+
+    /** Whether every row has the same source fluids. The source slot then cycles on its own. */
+    public static boolean sharesSources(List<FluidInteractionRecipe> rows) {
+        return rows.stream().map(FluidInteractionRecipe::sourceFluids).distinct().count() <= 1;
+    }
+
+    /** Whether every row shows the same neighbor entries. The neighbor slot then cycles on its own. */
+    public static boolean sharesNeighbors(List<FluidInteractionRecipe> rows) {
+        return rows.stream().map(FluidInteractionRecipe::neighborEntries).distinct().count() <= 1;
     }
 
     /** The distinct still fluids among {@link #sources}, for the JEI input slot. JEI knows only still fluids. */

@@ -49,6 +49,15 @@ public record Placement(BlockState block, @Nullable FluidState fluid) {
         return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
     }
 
+    /** What a slot shows for this placement: the still fluid, the item, or the block without an item. */
+    public Object slotEntry() {
+        if (isFluid()) {
+            return FluidInteractionRecipe.stillForm(effectiveFluid());
+        }
+        ItemStack item = asItem();
+        return item.isEmpty() ? block.getBlock() : item.getItem();
+    }
+
     public Component describe() {
         if (isFluid()) {
             Component fluid = effectiveFluid().getFluidType().getDescription();

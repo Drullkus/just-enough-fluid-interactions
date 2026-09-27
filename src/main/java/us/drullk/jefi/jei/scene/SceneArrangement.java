@@ -3,6 +3,8 @@ package us.drullk.jefi.jei.scene;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
@@ -11,6 +13,7 @@ import us.drullk.jefi.jei.ItemlessBlock;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 
+import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
@@ -38,6 +41,8 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * below a flow does not read as feeding it. A vertical flow is fed from the south instead. When both blocks of
  * the pair flow, the neighbor is fed from the west, so the two feeds never stack into a pair of their own. The
  * default camera looks from the north-east, so neither feed hides the other block.
+ *
+ * <p>A lockstep recipe draws one of its rows. The row is the one whose entries the slots show.
  */
 public final class SceneArrangement {
     /** Fluid level of a block drawn in its flowing form. Probing uses a full flow, a different value than the one assigned here. */
@@ -53,6 +58,10 @@ public final class SceneArrangement {
 
     /** Everything to place for one variant of a recipe, keyed by offset from the source position. */
     public static Map<BlockPos, Placement> of(FluidInteractionRecipe recipe, SceneVariant variant) {
+        if (recipe.isLockstep()) {
+            FluidInteractionRecipe row = recipe.rows().get(Math.floorMod(variant.row(), recipe.rows().size()));
+            return of(row, new SceneVariant(variant.source(), variant.neighbor(), variant.after()));
+        }
         Map<BlockPos, Placement> scene = new LinkedHashMap<>();
 
         BlockPos neighborPos = recipe.neighborOffset();
@@ -77,6 +86,64 @@ public final class SceneArrangement {
             recipe.results().forEach((pos, state) -> scene.put(pos, Placement.ofBlock(state)));
         }
         return scene;
+    }
+
+    /** Index of the row whose entries every shown slot shows, or 0. */
+    public static int rowIndex(FluidInteractionRecipe recipe, SlotLookup slots) {
+        Object source = FluidInteractionRecipe.sharesSources(recipe.rows()) ? null : displayed(slots, SlotLookup.SOURCE);
+        Object neighbor = FluidInteractionRecipe.sharesNeighbors(recipe.rows()) ? null : displayed(slots, SlotLookup.NEIGHBOR);
+        List<BlockPos> conditions = List.copyOf(recipe.conditions().keySet());
+        List<BlockPos> results = List.copyOf(recipe.results().keySet());
+        List<FluidInteractionRecipe> rows = recipe.rows();
+        for (int i = 0; i < rows.size(); i++) {
+            FluidInteractionRecipe row = rows.get(i);
+            if (source != null && !shows(Placement.ofFluid(row.sourceFluids().getFirst().defaultFluidState()), source)) {
+                continue;
+            }
+            if (neighbor != null && !row.neighbors().isEmpty() && !shows(row.neighbors().getFirst(), neighbor)) {
+                continue;
+            }
+            if (showsAll(slots, conditions, SlotLookup::condition, offset -> row.conditions().get(offset))
+                    && showsAll(slots, results, SlotLookup::result, offset -> Placement.ofBlock(row.results().get(offset)))) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static boolean showsAll(SlotLookup slots, List<BlockPos> offsets, IntFunction<String> name,
+                                    Function<BlockPos, @Nullable Placement> placement) {
+        for (int i = 0; i < offsets.size(); i++) {
+            Object shown = displayed(slots, name.apply(i));
+            Placement expected = placement.apply(offsets.get(i));
+            if (shown != null && (expected == null || !shows(expected, shown))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static @Nullable Object displayed(SlotLookup slots, String name) {
+        IRecipeSlotView slot = slots.slot(name);
+        ITypedIngredient<?> shown = slot == null ? null : slot.getDisplayedIngredient().orElse(null);
+        return shown == null ? null : shown.getIngredient();
+    }
+
+    /** Index of the neighbor alternative that shows a slot entry, in the form the scene prefers, or 0. */
+    public static int neighborIndexOfEntry(FluidInteractionRecipe recipe, Object entry) {
+        boolean preferFlowing = prefersFlow(recipe, recipe.neighborOffset());
+        List<Placement> neighbors = recipe.neighbors();
+        int match = -1;
+        for (int i = 0; i < neighbors.size(); i++) {
+            if (!neighbors.get(i).slotEntry().equals(entry)) {
+                continue;
+            }
+            if (neighbors.get(i).isFlowing() == preferFlowing) {
+                return i;
+            }
+            match = match < 0 ? i : match;
+        }
+        return Math.max(match, 0);
     }
 
     /** Index of the source fluid a slot is currently displaying, or 0 when it shows something unexpected. */
@@ -124,7 +191,8 @@ public final class SceneArrangement {
         return match;
     }
 
-    private static boolean shows(Placement placement, Object ingredient) {
+    /** Whether a slot entry shows this placement. */
+    public static boolean shows(Placement placement, Object ingredient) {
         if (ingredient instanceof FluidStack stack) {
             return placement.isFluid() && FluidInteractionRecipe.stillForm(placement.effectiveFluid()) == still(stack.getFluid());
         }

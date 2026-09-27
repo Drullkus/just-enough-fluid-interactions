@@ -51,6 +51,18 @@ public final class Config {
                     "biomesoplenty:null_block"
             ), () -> "", Config::isPlausibleId);
 
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> MERGE_WITHIN_MODS = BUILDER
+            .comment("Recipes of these mod ids merge when they differ only in the fluids and the blocks they make.")
+            .defineListAllowEmpty("mergeWithinMods", List.of(
+                    "alltheores",
+                    "colouredstuff",
+                    "create_dragons_plus",
+                    "createmetalwork",
+                    "dions_bitsnbobs",
+                    "garnished",
+                    "mingle"
+            ), () -> "", Config::isPlausibleModId);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

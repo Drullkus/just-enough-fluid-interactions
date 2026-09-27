@@ -29,15 +29,18 @@ public final class SceneView {
 
     /** The alternatives a layout's named slots currently show, or the first ones where a slot is missing. */
     public static SceneVariant variant(FluidInteractionRecipe recipe, @Nullable IRecipeSlotsView slots, boolean after) {
-        IRecipeSlotView source = slots == null ? null : slots.findSlotByName("source").orElse(null);
-        IRecipeSlotView neighbor = slots == null ? null : slots.findSlotByName("neighbor").orElse(null);
-        return variant(recipe, source, neighbor, after);
+        return variant(recipe, slots == null ? SlotLookup.NONE : name -> slots.findSlotByName(name).orElse(null), after);
     }
 
-    public static SceneVariant variant(FluidInteractionRecipe recipe, @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, boolean after) {
+    public static SceneVariant variant(FluidInteractionRecipe recipe, SlotLookup slots, boolean after) {
+        if (recipe.isLockstep()) {
+            int row = SceneArrangement.rowIndex(recipe, slots);
+            SceneVariant inRow = variant(recipe.rows().get(row), slots, after);
+            return new SceneVariant(inRow.source(), inRow.neighbor(), after, row);
+        }
         return new SceneVariant(
-                SceneArrangement.sourceIndex(recipe, displayed(source)),
-                SceneArrangement.neighborIndex(recipe, displayed(neighbor)),
+                SceneArrangement.sourceIndex(recipe, displayed(slots.slot(SlotLookup.SOURCE))),
+                SceneArrangement.neighborIndex(recipe, displayed(slots.slot(SlotLookup.NEIGHBOR))),
                 after);
     }
 
@@ -52,7 +55,7 @@ public final class SceneView {
      */
     public static void tooltip(ITooltipBuilder tooltip, FluidInteractionRecipe recipe, SceneVariant variant) {
         tooltip.add(Texts.key(variant.after() ? "after" : "before").withStyle(ChatFormatting.GRAY));
-        Map<BlockPos, Placement> otherPhase = SceneArrangement.of(recipe, new SceneVariant(variant.source(), variant.neighbor(), !variant.after()));
+        Map<BlockPos, Placement> otherPhase = SceneArrangement.of(recipe, variant.otherPhase());
         SceneArrangement.of(recipe, variant).forEach((offset, placement) -> {
             boolean unchanged = placement.equals(otherPhase.get(offset));
             tooltip.add(

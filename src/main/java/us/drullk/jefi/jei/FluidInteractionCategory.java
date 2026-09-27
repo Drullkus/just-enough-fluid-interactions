@@ -1,22 +1,29 @@
 package us.drullk.jefi.jei;
 
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
+import us.drullk.jefi.jei.scene.SceneArrangement;
 import us.drullk.jefi.jei.scene.SceneCache;
 import us.drullk.jefi.jei.scene.SceneDrawable;
 import us.drullk.jefi.jei.scene.SceneRotation;
+import us.drullk.jefi.jei.scene.SceneVariant;
 import us.drullk.jefi.jei.scene.SceneView;
 import us.drullk.jefi.jei.scene.SceneWidget;
+import us.drullk.jefi.jei.scene.SlotLookup;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.IRecipeSlotBuilder;
@@ -28,11 +35,14 @@ import mezz.jei.api.gui.placement.HorizontalAlignment;
 import mezz.jei.api.gui.placement.IPlaceable;
 import mezz.jei.api.gui.placement.VerticalAlignment;
 import mezz.jei.api.gui.widgets.IRecipeExtrasBuilder;
-import mezz.jei.api.helpers.IGuiHelper;
+import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.neoforge.NeoForgeTypes;
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.AbstractRecipeCategory;
+import mezz.jei.api.runtime.IIngredientVisibility;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
@@ -52,8 +62,12 @@ import net.neoforged.neoforge.fluids.FluidType;
  * Above the left scene sits the input row: the source fluid, the neighbor, and any extra required blocks,
  * separated by plus signs. Above the right scene sit the results. A recipe whose interaction the probe cannot
  * process shows only the source fluid and an explanation.
+ *
+ * <p>Each slot of a lockstep recipe holds one entry per row. A focus link joins the slots.
  */
 public final class FluidInteractionCategory extends AbstractRecipeCategory<FluidInteractionRecipe> {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public static final int WIDTH = 170;
     public static final int HEIGHT = 100;
 
@@ -77,9 +91,13 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private final Map<FluidInteractionRecipe, IRecipeSlotsView> drawnSlots = new IdentityHashMap<>();
     /** The orbit angles of the scenes a layout drew as drawables. A click on the category can only turn these angles. */
     private final Map<FluidInteractionRecipe, SceneRotation> staticRotations = new IdentityHashMap<>();
+    /** The rows each lockstep recipe's slots hold. */
+    private final Map<FluidInteractionRecipe, List<FluidInteractionRecipe>> shownRows = new IdentityHashMap<>();
+    private final IJeiHelpers helpers;
 
-    public FluidInteractionCategory(IGuiHelper guiHelper, SceneCache scenes) {
-        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), guiHelper.drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
+    public FluidInteractionCategory(IJeiHelpers helpers, SceneCache scenes) {
+        super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), helpers.getGuiHelper().drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
+        this.helpers = helpers;
         this.scenes = scenes;
     }
 
@@ -90,23 +108,114 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
             stillFluidsOf(recipe.sourceType()).forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
             return;
         }
+        if (recipe.isLockstep()) {
+            setRows(builder, recipe);
+            return;
+        }
         int[] inputs = inputSlotX(recipe);
         int next = 0;
-        addSourceSlot(builder, recipe, inputs[next++]);
+        addSourceSlot(builder, recipe, inputs[next++], recipe.sourceFluids());
         if (!recipe.neighbors().isEmpty()) {
-            addNeighborSlot(builder, recipe, inputs[next++]);
+            addPlacements(addNeighborSlot(builder, recipe, inputs[next++]), recipe.neighbors());
         }
+        int index = 0;
         for (var condition : recipe.conditions().entrySet()) {
-            addConditionSlot(builder, recipe, condition.getKey(), condition.getValue(), inputs[next++]);
+            addPlacements(addConditionSlot(builder, recipe, condition.getKey(), index++, inputs[next++]), List.of(condition.getValue()));
         }
-        addResultSlots(builder, recipe);
+        int[] results = resultSlotX(recipe);
+        index = 0;
+        for (var result : recipe.results().entrySet()) {
+            addPlacements(addResultSlot(builder, result.getKey(), index, results[index++]), List.of(Placement.ofBlock(result.getValue())));
+        }
+    }
+
+    /** One entry per shown row in every linked slot, and one focus link over the linked slots. */
+    private void setRows(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe) {
+        List<FluidInteractionRecipe> rows = visibleRows(visibility(), recipe);
+        shownRows.put(recipe, rows);
+        List<IRecipeSlotBuilder> slots = new ArrayList<>();
+        int[] inputs = inputSlotX(recipe);
+        int next = 0;
+        if (FluidInteractionRecipe.sharesSources(recipe.rows())) {
+            addSourceSlot(builder, recipe, inputs[next++], recipe.rows().getFirst().sourceFluids());
+        } else {
+            slots.add(addSourceSlot(builder, recipe, inputs[next++], rows.stream().map(row -> row.sourceFluids().getFirst()).toList()));
+        }
+        if (!recipe.neighbors().isEmpty() && FluidInteractionRecipe.sharesNeighbors(recipe.rows())) {
+            addPlacements(addNeighborSlot(builder, recipe, inputs[next++]), recipe.neighbors());
+        } else if (!recipe.neighbors().isEmpty()) {
+            slots.add(addEntries(addNeighborSlot(builder, recipe, inputs[next++]), rows, row -> row.neighbors().getFirst()));
+        }
+        int index = 0;
+        for (BlockPos offset : recipe.conditions().keySet()) {
+            IRecipeSlotBuilder slot = addConditionSlot(builder, recipe, offset, index++, inputs[next++]);
+            slots.add(addEntries(slot, rows, row -> row.conditions().get(offset)));
+        }
+        int[] results = resultSlotX(recipe);
+        index = 0;
+        for (BlockPos offset : recipe.results().keySet()) {
+            IRecipeSlotBuilder slot = addResultSlot(builder, offset, index, results[index++]);
+            slots.add(addEntries(slot, rows, row -> Placement.ofBlock(row.results().get(offset))));
+        }
+        try {
+            builder.createFocusLink(slots.toArray(IRecipeSlotBuilder[]::new));
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.debug("The recipe layout of {} takes no focus link", recipe.id(), e);
+        }
+    }
+
+    private @Nullable IIngredientVisibility visibility() {
+        try {
+            return helpers.getIngredientVisibility();
+        } catch (RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /** The rows without a hidden entry in a linked slot. JEI drops a hidden entry from its slot alone. */
+    public static List<FluidInteractionRecipe> visibleRows(@Nullable IIngredientVisibility visibility, FluidInteractionRecipe recipe) {
+        if (visibility == null) {
+            return recipe.rows();
+        }
+        boolean sources = !FluidInteractionRecipe.sharesSources(recipe.rows());
+        boolean neighbors = !FluidInteractionRecipe.sharesNeighbors(recipe.rows());
+        List<FluidInteractionRecipe> visible = recipe.rows().stream().filter(row -> isVisible(visibility, row, sources, neighbors)).toList();
+        return visible.isEmpty() ? recipe.rows() : visible;
+    }
+
+    private static boolean isVisible(IIngredientVisibility visibility, FluidInteractionRecipe row, boolean sources, boolean neighbors) {
+        List<Placement> entries = new ArrayList<>();
+        if (sources) {
+            entries.add(Placement.ofFluid(row.sourceFluids().getFirst().defaultFluidState()));
+        }
+        if (neighbors && !row.neighbors().isEmpty()) {
+            entries.add(row.neighbors().getFirst());
+        }
+        entries.addAll(row.conditions().values());
+        row.results().values().forEach(state -> entries.add(Placement.ofBlock(state)));
+        try {
+            return entries.stream().allMatch(entry -> isVisible(visibility, entry));
+        } catch (RuntimeException | LinkageError e) {
+            return true;
+        }
+    }
+
+    private static boolean isVisible(IIngredientVisibility visibility, Placement placement) {
+        if (placement.isFluid()) {
+            Fluid fluid = FluidInteractionRecipe.stillForm(placement.effectiveFluid());
+            return visibility.isIngredientVisible(NeoForgeTypes.FLUID_STACK, new FluidStack(fluid, FluidType.BUCKET_VOLUME));
+        }
+        ItemStack item = placement.asItem();
+        return item.isEmpty()
+                ? visibility.isIngredientVisible(ItemlessBlock.TYPE, new ItemlessBlock(placement.block()))
+                : visibility.isIngredientVisible(VanillaTypes.ITEM_STACK, item);
     }
 
     /** The source slot cycles the still fluids. Its tooltip names the forms, and the inert form when one exists. */
-    private static void addSourceSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x) {
+    private static IRecipeSlotBuilder addSourceSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x, List<Fluid> fluids) {
         boolean sourceFlows = recipe.sources().stream().anyMatch(state -> !state.isSource());
-        IRecipeSlotBuilder source = slot(builder.addSlot(role(recipe, BlockPos.ZERO, sourceFlows), x, ROW_Y)).setSlotName("source");
-        recipe.sourceFluids().forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
+        IRecipeSlotBuilder source = slot(builder.addSlot(role(recipe, BlockPos.ZERO, sourceFlows), x, ROW_Y)).setSlotName(SlotLookup.SOURCE);
+        fluids.forEach(fluid -> source.addFluidStack(fluid, FluidType.BUCKET_VOLUME));
         source.addRichTooltipCallback((view, tooltip) -> {
             tooltip.add(Texts.forms(recipe).withStyle(ChatFormatting.GRAY));
             Fluid shown = displayedFluid(view);
@@ -115,13 +224,13 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
                 tooltip.add(Texts.inertSource(inert).withStyle(ChatFormatting.YELLOW));
             }
         });
+        return source;
     }
 
     /** The neighbor slot cycles the alternatives. Its tooltip names the position, and the inert form when one exists. */
-    private static void addNeighborSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x) {
+    private static IRecipeSlotBuilder addNeighborSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, int x) {
         boolean neighborFlows = recipe.neighbors().stream().anyMatch(Placement::isFlowing);
-        IRecipeSlotBuilder neighbor = slot(builder.addSlot(role(recipe, recipe.neighborOffset(), neighborFlows), x, ROW_Y)).setSlotName("neighbor");
-        addPlacements(neighbor, recipe.neighbors());
+        IRecipeSlotBuilder neighbor = slot(builder.addSlot(role(recipe, recipe.neighborOffset(), neighborFlows), x, ROW_Y)).setSlotName(SlotLookup.NEIGHBOR);
         neighbor.addRichTooltipCallback((view, tooltip) -> {
             tooltip.add(Texts.offset(recipe.neighborOffset()).withStyle(ChatFormatting.GRAY));
             Fluid shown = displayedFluid(view);
@@ -130,26 +239,23 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
                 tooltip.add(Texts.inertNeighbor(inert).withStyle(ChatFormatting.YELLOW));
             }
         });
+        return neighbor;
     }
 
-    private static void addConditionSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, BlockPos offset, Placement placement, int x) {
-        IRecipeSlotBuilder slot = slot(builder.addSlot(role(recipe, offset, placement.isFlowing()), x, ROW_Y));
-        addPlacements(slot, List.of(placement));
+    private static IRecipeSlotBuilder addConditionSlot(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe, BlockPos offset, int index, int x) {
+        boolean flows = recipe.rowsOrSelf().stream().map(row -> row.conditions().get(offset)).anyMatch(placement -> placement != null && placement.isFlowing());
+        IRecipeSlotBuilder slot = slot(builder.addSlot(role(recipe, offset, flows), x, ROW_Y)).setSlotName(SlotLookup.condition(index));
         slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
+        return slot;
     }
 
-    /** One output slot per result, in a row. A result away from the source names its position in the tooltip. */
-    private static void addResultSlots(IRecipeLayoutBuilder builder, FluidInteractionRecipe recipe) {
-        int resultX = resultSlotX(recipe);
-        for (var result : recipe.results().entrySet()) {
-            BlockPos offset = result.getKey();
-            IRecipeSlotBuilder slot = slot(builder.addOutputSlot(resultX, ROW_Y));
-            addPlacements(slot, List.of(Placement.ofBlock(result.getValue())));
-            if (!offset.equals(BlockPos.ZERO)) {
-                slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
-            }
-            resultX += SLOT_SIZE + RESULT_GAP;
+    /** An output slot of the result row. A result away from the source names its position in the tooltip. */
+    private static IRecipeSlotBuilder addResultSlot(IRecipeLayoutBuilder builder, BlockPos offset, int index, int x) {
+        IRecipeSlotBuilder slot = slot(builder.addOutputSlot(x, ROW_Y)).setSlotName(SlotLookup.result(index));
+        if (!offset.equals(BlockPos.ZERO)) {
+            slot.addRichTooltipCallback((view, tooltip) -> tooltip.add(Texts.offset(offset).withStyle(ChatFormatting.GRAY)));
         }
+        return slot;
     }
 
     /**
@@ -169,15 +275,16 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
             place(builder.addRecipePlusSign(), inputs[i - 1] - 1 + SLOT_SIZE, ROW_Y, PLUS_GAP, 16);
         }
 
-        IRecipeSlotView source = slots == null ? null : slots.findSlotByName("source").orElse(null);
-        IRecipeSlotView neighbor = slots == null ? null : slots.findSlotByName("neighbor").orElse(null);
+        SlotLookup lookup = slots == null ? SlotLookup.NONE : name -> slots.findSlotByName(name).orElse(null);
+        IRecipeSlotView source = lookup.slot(SlotLookup.SOURCE);
+        IRecipeSlotView neighbor = lookup.slot(SlotLookup.NEIGHBOR);
         SceneRotation rotation = new SceneRotation();
         if (slots == null) {
             staticRotations.put(recipe, rotation);
         }
-        addScene(builder, recipe, false, slots == null, rotation, source, neighbor, BEFORE_X);
+        addScene(builder, recipe, false, slots == null, rotation, lookup, BEFORE_X);
         place(builder.addRecipeArrow(), BEFORE_X + SCENE_SIZE, SCENE_Y, AFTER_X - BEFORE_X - SCENE_SIZE, SCENE_SIZE);
-        addScene(builder, recipe, true, slots == null, rotation, source, neighbor, AFTER_X);
+        addScene(builder, recipe, true, slots == null, rotation, lookup, AFTER_X);
 
         if (source != null) {
             addIndicator(builder, InertFormIndicator.forSource(source, recipe, inputs[0] - 1, ROW_Y));
@@ -218,7 +325,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         if (after == null) {
             return;
         }
-        SceneView.tooltip(tooltip, recipe, SceneView.variant(recipe, slots, after));
+        boolean clock = recipe.isLockstep() && staticRotations.containsKey(recipe);
+        SceneView.tooltip(tooltip, recipe, clock ? staticVariant(recipe, after) : SceneView.variant(recipe, slots, after));
         if (staticRotations.containsKey(recipe)) {
             tooltip.add(Texts.clickToRotate().withStyle(ChatFormatting.DARK_GRAY));
         }
@@ -277,15 +385,30 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
 
     /** A rotatable widget when the layout can position and drive it. Otherwise, a drawable that the category turns. */
     private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, boolean drawable, SceneRotation rotation,
-                          @Nullable IRecipeSlotView source, @Nullable IRecipeSlotView neighbor, int x) {
+                          SlotLookup slots, int x) {
         if (drawable) {
-            SceneDrawable scene = new SceneDrawable(scenes, recipe, () -> SceneView.variant(recipe, drawnSlots.get(recipe), after), rotation, SCENE_SIZE, SCENE_SIZE);
+            SceneDrawable scene = new SceneDrawable(scenes, recipe, () -> staticVariant(recipe, after), rotation, SCENE_SIZE, SCENE_SIZE);
             builder.addDrawable(scene).setPosition(x, SCENE_Y);
             return;
         }
-        SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, source, neighbor, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
+        SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, slots, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
         builder.addInputHandler(widget);
         builder.addWidget(widget);
+    }
+
+    /** EMI shows entry {@code seconds % size} of a cycling slot, so a static scene shows that row. */
+    private SceneVariant staticVariant(FluidInteractionRecipe recipe, boolean after) {
+        if (!recipe.isLockstep()) {
+            return SceneView.variant(recipe, drawnSlots.get(recipe), after);
+        }
+        long seconds = System.currentTimeMillis() / 1000L;
+        List<FluidInteractionRecipe> rows = shownRows.getOrDefault(recipe, recipe.rows());
+        FluidInteractionRecipe shown = rows.get((int) (seconds % rows.size()));
+        int row = Math.max(0, recipe.rows().indexOf(shown));
+        int source = (int) (seconds % shown.sourceFluids().size());
+        List<Object> entries = shown.neighborEntries();
+        int neighbor = entries.isEmpty() ? 0 : SceneArrangement.neighborIndexOfEntry(shown, entries.get((int) (seconds % entries.size())));
+        return new SceneVariant(source, neighbor, after, row);
     }
 
     /**
@@ -312,14 +435,19 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         return xs;
     }
 
-    /** Ingredient x of the first result slot: centered over the right scene, pushed right to clear the input row. */
-    private static int resultSlotX(FluidInteractionRecipe recipe) {
+    /** Ingredient x of each result slot: the row is centered over the right scene, pushed right to clear the input row. */
+    private static int[] resultSlotX(FluidInteractionRecipe recipe) {
         int count = Math.max(1, recipe.results().size());
         int width = count * SLOT_SIZE + (count - 1) * RESULT_GAP;
         int[] inputs = inputSlotX(recipe);
         int rowRight = inputs[inputs.length - 1] - 1 + SLOT_SIZE;
         int left = Math.max(rowRight + MIN_MARGIN, AFTER_X + SCENE_SIZE / 2 - width / 2);
-        return Math.min(left, WIDTH - MIN_MARGIN - width) + 1;
+        int first = Math.min(left, WIDTH - MIN_MARGIN - width) + 1;
+        int[] xs = new int[recipe.results().size()];
+        for (int i = 0; i < xs.length; i++) {
+            xs[i] = first + i * (SLOT_SIZE + RESULT_GAP);
+        }
+        return xs;
     }
 
     private static int centered(int width) {
@@ -342,19 +470,28 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static void addPlacements(IRecipeSlotBuilder slot, List<Placement> placements) {
         Set<Fluid> fluids = new LinkedHashSet<>();
         for (Placement placement : placements) {
-            if (placement.isFluid()) {
-                Fluid fluid = FluidInteractionRecipe.stillForm(placement.effectiveFluid());
-                if (fluids.add(fluid)) {
-                    slot.addFluidStack(fluid, FluidType.BUCKET_VOLUME);
-                }
-                continue;
+            if (!placement.isFluid() || fluids.add(FluidInteractionRecipe.stillForm(placement.effectiveFluid()))) {
+                addEntry(slot, placement);
             }
-            ItemStack item = placement.asItem();
-            if (item.isEmpty()) {
-                slot.addIngredient(ItemlessBlock.TYPE, new ItemlessBlock(placement.block()));
-            } else {
-                slot.addItemStack(item);
-            }
+        }
+    }
+
+    /** One entry per row, repeats included. */
+    private static IRecipeSlotBuilder addEntries(IRecipeSlotBuilder slot, List<FluidInteractionRecipe> rows, Function<FluidInteractionRecipe, Placement> entry) {
+        rows.forEach(row -> addEntry(slot, entry.apply(row)));
+        return slot;
+    }
+
+    private static void addEntry(IRecipeSlotBuilder slot, Placement placement) {
+        if (placement.isFluid()) {
+            slot.addFluidStack(FluidInteractionRecipe.stillForm(placement.effectiveFluid()), FluidType.BUCKET_VOLUME);
+            return;
+        }
+        ItemStack item = placement.asItem();
+        if (item.isEmpty()) {
+            slot.addIngredient(ItemlessBlock.TYPE, new ItemlessBlock(placement.block()));
+        } else {
+            slot.addItemStack(item);
         }
     }
 

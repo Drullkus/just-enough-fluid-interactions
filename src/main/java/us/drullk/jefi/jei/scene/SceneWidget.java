@@ -1,14 +1,11 @@
 package us.drullk.jefi.jei.scene;
 
 
-import org.jetbrains.annotations.Nullable;
-
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import mezz.jei.api.gui.builder.ITooltipBuilder;
-import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.inputs.IJeiInputHandler;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.gui.widgets.IRecipeWidget;
@@ -29,22 +26,19 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     private final FluidInteractionRecipe recipe;
     private final boolean after;
     private final SceneRotation rotation;
-    private final @Nullable IRecipeSlotView sourceSlot;
-    private final @Nullable IRecipeSlotView neighborSlot;
+    private final SlotLookup slots;
     private final ScreenPosition position;
     private final ScreenRectangle area;
     private final int width;
     private final int height;
 
     public SceneWidget(SceneCache cache, FluidInteractionRecipe recipe, boolean after, SceneRotation rotation,
-                       @Nullable IRecipeSlotView sourceSlot, @Nullable IRecipeSlotView neighborSlot,
-                       int x, int y, int width, int height) {
+                       SlotLookup slots, int x, int y, int width, int height) {
         this.view = new SceneView(cache, recipe);
         this.recipe = recipe;
         this.after = after;
         this.rotation = rotation;
-        this.sourceSlot = sourceSlot;
-        this.neighborSlot = neighborSlot;
+        this.slots = slots;
         this.position = new ScreenPosition(x, y);
         this.area = new ScreenRectangle(x, y, width, height);
         this.width = width;
@@ -118,6 +112,6 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     }
 
     private SceneVariant variant() {
-        return SceneView.variant(recipe, sourceSlot, neighborSlot, after);
+        return SceneView.variant(recipe, slots, after);
     }
 }

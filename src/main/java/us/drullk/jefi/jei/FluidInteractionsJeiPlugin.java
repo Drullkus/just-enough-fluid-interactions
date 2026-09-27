@@ -63,7 +63,7 @@ public final class FluidInteractionsJeiPlugin implements IModPlugin {
 
     @Override
     public void registerCategories(IRecipeCategoryRegistration registration) {
-        registration.addRecipeCategories(new FluidInteractionCategory(registration.getJeiHelpers().getGuiHelper(), scenes));
+        registration.addRecipeCategories(new FluidInteractionCategory(registration.getJeiHelpers(), scenes));
     }
 
     @Override

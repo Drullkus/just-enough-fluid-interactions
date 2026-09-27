@@ -1,7 +1,10 @@
 package us.drullk.jefi.devtest;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -9,17 +12,24 @@ import org.slf4j.Logger;
 import us.drullk.jefi.jei.FluidInteractionCategory;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.ItemlessBlock;
+import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
+import us.drullk.jefi.jei.probe.Placement;
+import us.drullk.jefi.jei.scene.SceneArrangement;
 import com.mojang.logging.LogUtils;
 
 import dev.emi.emi.api.EmiApi;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
+import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
+import dev.emi.emi.jemi.JemiRecipe;
 import dev.emi.emi.jemi.JemiStack;
+import dev.emi.emi.jemi.JemiUtil;
 import dev.emi.emi.screen.RecipeScreen;
 import dev.emi.emi.screen.WidgetGroup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -33,12 +43,14 @@ final class EmiAutoTestSteps {
     private static final int MAX_SHOTS = 4;
 
     private static int shot;
+    private static boolean lockstepShown;
     private static List<EmiRecipe> recipes = List.of();
 
     /**
      * The test runs as a list of steps. It enters the world. It opens the category. It screenshots the category
      * and the first recipes. It clicks the left scene of the recipe on screen. It screenshots the recipe turned.
-     * It shows the recipe with a block without an item and screenshots it. It stops the client.
+     * It shows the recipe with a block without an item and screenshots it. It shows a lockstep recipe and
+     * screenshots it. It stops the client.
      */
     private static final TickSteps STEPS = new TickSteps()
             .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
@@ -56,6 +68,8 @@ final class EmiAutoTestSteps {
             .after(20, mc -> grab(mc, "rotated"))
             .after(10, EmiAutoTestSteps::showBlockless)
             .after(20, mc -> grab(mc, "blockless"))
+            .after(10, EmiAutoTestSteps::showLockstep)
+            .after(20, EmiAutoTestSteps::grabLockstep)
             .after(10, mc -> {
                 LOGGER.info("{} finished, stopping the client", PREFIX);
                 mc.stop();
@@ -140,6 +154,94 @@ final class EmiAutoTestSteps {
         LOGGER.info("{} blockless {}: output {}, EMI finds {} recipe(s) by the output", PREFIX, found.getId(),
                 output.getName().getString(), byOutput.size());
         EmiApi.displayRecipe(found);
+    }
+
+    /** Each EMI ingredient of a lockstep recipe holds its slot's entries in order, or one entry of every row. */
+    private static void showLockstep(Minecraft mc) {
+        for (EmiRecipe recipe : recipes) {
+            if (!(recipe instanceof JemiRecipe<?> jemi) || !(jemi.recipe instanceof FluidInteractionRecipe lockstep) || !lockstep.isLockstep()) {
+                continue;
+            }
+            List<List<Placement>> slots = slotRows(lockstep);
+            List<EmiIngredient> ingredients = new ArrayList<>(jemi.inputs);
+            ingredients.addAll(jemi.catalysts);
+            int size = lockstep.rows().size();
+            for (int i = 0; i + size <= jemi.outputs.size() && size > 0; i += size) {
+                ingredients.add(EmiIngredient.of(jemi.outputs.subList(i, i + size)));
+            }
+            List<String> offenders = new ArrayList<>();
+            for (EmiIngredient ingredient : ingredients) {
+                if (slots.stream().noneMatch(rows -> holds(ingredient, rows))) {
+                    offenders.add(ingredient.getEmiStacks().size() + " stack(s) " + ingredient.getEmiStacks().stream()
+                            .map(stack -> stack.getName().getString()).toList());
+                }
+            }
+            if (ingredients.size() != slots.size()) {
+                offenders.add(ingredients.size() + " ingredient(s) for " + slots.size() + " slot(s)");
+            }
+            int row = (int) (System.currentTimeMillis() / 1000L % size);
+            if (offenders.isEmpty()) {
+                LOGGER.info("{} merged within a mod {}: {} row(s), {} slot(s) in row order, clock row {}: {}", PREFIX, recipe.getId(),
+                        size, slots.size(), row, slots.stream().map(rows -> rows.get(row % rows.size()).describe().getString()).toList());
+            } else {
+                LOGGER.error("{} merged within a mod {} is out of step: {}", PREFIX, recipe.getId(), offenders);
+            }
+            lockstepShown = true;
+            EmiApi.displayRecipe(recipe);
+            return;
+        }
+        LOGGER.error("{} found no lockstep recipe", PREFIX);
+    }
+
+    private static void grabLockstep(Minecraft mc) {
+        if (lockstepShown) {
+            grab(mc, "merged_within");
+        }
+    }
+
+    /** The entry each slot shows per row, in slot order. */
+    private static List<List<Placement>> slotRows(FluidInteractionRecipe recipe) {
+        List<List<Placement>> slots = new ArrayList<>();
+        if (FluidInteractionRecipe.sharesSources(recipe.rows())) {
+            slots.add(recipe.rows().getFirst().sourceFluids().stream().map(fluid -> Placement.ofFluid(fluid.defaultFluidState())).toList());
+        } else {
+            slots.add(recipe.rows().stream().map(row -> Placement.ofFluid(row.sourceFluids().getFirst().defaultFluidState())).toList());
+        }
+        if (!recipe.neighbors().isEmpty() && FluidInteractionRecipe.sharesNeighbors(recipe.rows())) {
+            Map<Object, Placement> entries = new LinkedHashMap<>();
+            recipe.neighbors().forEach(neighbor -> entries.putIfAbsent(neighbor.slotEntry(), neighbor));
+            slots.add(List.copyOf(entries.values()));
+        } else if (!recipe.neighbors().isEmpty()) {
+            slots.add(recipe.rows().stream().map(row -> row.neighbors().getFirst()).toList());
+        }
+        for (BlockPos offset : recipe.conditions().keySet()) {
+            slots.add(recipe.rows().stream().map(row -> row.conditions().get(offset)).toList());
+        }
+        for (BlockPos offset : recipe.results().keySet()) {
+            slots.add(recipe.rows().stream().map(row -> Placement.ofBlock(row.results().get(offset))).toList());
+        }
+        return slots;
+    }
+
+    /** Whether an ingredient holds these rows in order, or one entry that every row shows. */
+    private static boolean holds(EmiIngredient ingredient, List<Placement> rows) {
+        List<EmiStack> stacks = ingredient.getEmiStacks();
+        if (stacks.size() == 1) {
+            return rows.stream().allMatch(row -> shows(row, stacks.getFirst()));
+        }
+        if (stacks.size() != rows.size()) {
+            return false;
+        }
+        for (int i = 0; i < stacks.size(); i++) {
+            if (!shows(rows.get(i), stacks.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean shows(Placement placement, EmiStack stack) {
+        return JemiUtil.getTyped(stack).map(typed -> SceneArrangement.shows(placement, typed.getIngredient())).orElse(false);
     }
 
     /** EMI keeps the groups of the page it shows to itself. The recipe this test clicks is the first group. */

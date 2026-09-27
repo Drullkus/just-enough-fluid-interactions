@@ -38,8 +38,11 @@ final class GroundCheck {
     private GroundCheck() {
     }
 
-    /** One source state of a recipe against one of its neighbor alternatives, or against nothing when it has none. */
-    record Alternative(FluidInteractionRecipe recipe, FluidState source, @Nullable Placement neighbor) {
+    /**
+     * One source state of a recipe against one of its neighbor alternatives, or against nothing when it has none.
+     * For a lockstep recipe, {@code recipe} is one row and {@code listed} is the recipe JEI lists.
+     */
+    record Alternative(FluidInteractionRecipe recipe, FluidState source, @Nullable Placement neighbor, FluidInteractionRecipe listed) {
         String describe() {
             return Texts.form(source).getString() + ", " + (neighbor != null ? neighbor.describe().getString() : "no neighbor");
         }
@@ -49,20 +52,22 @@ final class GroundCheck {
     record Mismatch(BlockPos offset, BlockState expected, BlockState found) {
     }
 
-    /** Every alternative of every recipe a probe claims to have exercised, in recipe order. */
+    /** Every alternative of every recipe a probe claims to have exercised, in recipe order. A row is a recipe here. */
     static List<Alternative> alternatives(List<FluidInteractionRecipe> recipes) {
         List<Alternative> alternatives = new ArrayList<>();
-        for (FluidInteractionRecipe recipe : recipes) {
-            if (recipe.isFailure() || recipe.results().isEmpty()) {
+        for (FluidInteractionRecipe listed : recipes) {
+            if (listed.isFailure() || listed.results().isEmpty()) {
                 continue;
             }
-            for (FluidState source : recipe.sources()) {
-                if (recipe.neighbors().isEmpty()) {
-                    alternatives.add(new Alternative(recipe, source, null));
-                    continue;
-                }
-                for (Placement neighbor : recipe.neighbors()) {
-                    alternatives.add(new Alternative(recipe, source, neighbor));
+            for (FluidInteractionRecipe recipe : listed.rowsOrSelf()) {
+                for (FluidState source : recipe.sources()) {
+                    if (recipe.neighbors().isEmpty()) {
+                        alternatives.add(new Alternative(recipe, source, null, listed));
+                        continue;
+                    }
+                    for (Placement neighbor : recipe.neighbors()) {
+                        alternatives.add(new Alternative(recipe, source, neighbor, listed));
+                    }
                 }
             }
         }

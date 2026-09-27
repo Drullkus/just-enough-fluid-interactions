@@ -20,6 +20,7 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.fluids.FluidType;
@@ -36,6 +37,10 @@ import net.neoforged.neoforge.fluids.FluidType;
  * whose every result block is in {@code mergeAcrossMods} matches on its neighbor kinds, fluid or block, and not
  * on its owner. A merge of several owners has no owner and a {@code merged} id. Neighbor alternatives compare by block state and still fluid, plus the forms each one matched in. So
  * the exact flowing state a probe recorded never decides a merge. Failure recipes never merge.
+ *
+ * <p>A fluid result compares by its still form. Members whose results then differ in state become rows.
+ *
+ * <p>A third pass, {@link LockstepMerger}, merges the recipes of each mod in {@code mergeWithinMods} into rows.
  *
  * <p>A merged recipe keeps the id and source type of its first member in probe order. Probe order ranks the
  * source fluid type by namespace, and then by path. The namespace rank is {@code minecraft}, then
@@ -69,14 +74,19 @@ public final class RecipeMerger {
     private RecipeMerger() {
     }
 
-    /** Merges with the config's {@code mergeAcrossMods}. */
+    /** Merges with the config's {@code mergeAcrossMods} and {@code mergeWithinMods}. */
     public static List<FluidInteractionRecipe> merge(List<FluidInteractionRecipe> recipes) {
-        return merge(recipes, blockIds(Config.MERGE_ACROSS_MODS.get()));
+        return merge(recipes, blockIds(Config.MERGE_ACROSS_MODS.get()), Set.copyOf(Config.MERGE_WITHIN_MODS.get()));
     }
 
-    /** @param acrossMods the result blocks whose recipes merge without their owner. */
-    public static List<FluidInteractionRecipe> merge(List<FluidInteractionRecipe> recipes, Set<ResourceLocation> acrossMods) {
+    /**
+     * @param acrossMods the result blocks whose recipes merge without their owner.
+     * @param withinMods the mod ids whose recipes merge into rows.
+     */
+    public static List<FluidInteractionRecipe> merge(List<FluidInteractionRecipe> recipes, Set<ResourceLocation> acrossMods,
+                                                     Set<String> withinMods) {
         List<FluidInteractionRecipe> merged = pass(pass(recipes, recipe -> withinType(recipe, acrossMods)), recipe -> acrossTypes(recipe, acrossMods));
+        merged = LockstepMerger.merge(merged, withinMods);
         LOGGER.info("Merged {} fluid interaction recipe(s) into {}", recipes.size(), merged.size());
         return merged;
     }
@@ -112,7 +122,7 @@ public final class RecipeMerger {
         Map<Merge, ResourceLocation> ids = mergedIds(byKey);
         List<FluidInteractionRecipe> result = new ArrayList<>(merges.size());
         for (Merge merge : merges) {
-            result.add(merge.build(ids.get(merge)));
+            result.addAll(merge.build(ids.get(merge)));
         }
         return result;
     }
@@ -200,7 +210,16 @@ public final class RecipeMerger {
     }
 
     private static Key withinType(FluidInteractionRecipe recipe, Set<ResourceLocation> acrossMods) {
-        return new WithinType(recipe.sourceType(), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
+        return new WithinType(recipe.sourceType(), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), stillResults(recipe), forms(recipe));
+    }
+
+    /** The results with each liquid block in its source form. A fluid result thus matches at any level. */
+    private static Map<BlockPos, BlockState> stillResults(FluidInteractionRecipe recipe) {
+        Map<BlockPos, BlockState> results = new HashMap<>();
+        recipe.results().forEach((offset, state) -> results.put(offset, state.getBlock() instanceof LiquidBlock
+                ? FluidInteractionRecipe.stillForm(state.getFluidState()).defaultFluidState().createLegacyBlock()
+                : state));
+        return results;
     }
 
     /** The owner, or the neighbor kinds when every result block merges across mods. */
@@ -213,7 +232,7 @@ public final class RecipeMerger {
     }
 
     /** Whether the neighbor alternatives hold fluids, blocks or both, as a bit mask. */
-    private static int neighborKinds(FluidInteractionRecipe recipe) {
+    static int neighborKinds(FluidInteractionRecipe recipe) {
         int kinds = 0;
         for (Placement neighbor : recipe.neighbors()) {
             kinds |= neighbor.isFluid() ? KIND_FLUID : KIND_BLOCK;
@@ -222,11 +241,11 @@ public final class RecipeMerger {
     }
 
     private static Key acrossTypes(FluidInteractionRecipe recipe, Set<ResourceLocation> acrossMods) {
-        return new AcrossTypes(neighborForms(recipe), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), recipe.results(), forms(recipe));
+        return new AcrossTypes(neighborForms(recipe), ownerKey(recipe, acrossMods), recipe.neighborOffset(), recipe.conditions(), stillResults(recipe), forms(recipe));
     }
 
     /** Which forms the source matched in, as a bit mask. A still-only pattern thus never merges with a flowing one. */
-    private static int forms(FluidInteractionRecipe recipe) {
+    static int forms(FluidInteractionRecipe recipe) {
         return (recipe.matchesSourceForm() ? FORM_SOURCE : 0) | (recipe.matchesFlowingForm() ? FORM_FLOWING : 0);
     }
 
@@ -283,9 +302,13 @@ public final class RecipeMerger {
     private record NeighborForms(Placement neighbor, int forms) {
     }
 
-    /** The members of one merge. The first member supplies everything the merged recipe does not union. */
+    /**
+     * The members of one merge. The first member supplies everything the merged recipe does not union. Members
+     * whose results differ in state, or that hold rows, become rows.
+     */
     private static final class Merge {
         private final FluidInteractionRecipe first;
+        private final List<FluidInteractionRecipe> all = new ArrayList<>();
         private final Set<FluidState> sources = new LinkedHashSet<>();
         private final Set<Placement> neighbors = new LinkedHashSet<>();
         private final Set<FluidState> inertSources = new LinkedHashSet<>();
@@ -304,6 +327,7 @@ public final class RecipeMerger {
             inertSources.addAll(recipe.inert().sources());
             inertNeighbors.addAll(recipe.inert().neighbors());
             owners.add(recipe.owner());
+            all.add(recipe);
             members++;
         }
 
@@ -312,16 +336,22 @@ public final class RecipeMerger {
          *
          * @param mergedId the id of a merge with several owners, which then has no owner.
          */
-        FluidInteractionRecipe build(@Nullable ResourceLocation mergedId) {
+        List<FluidInteractionRecipe> build(@Nullable ResourceLocation mergedId) {
             if (members == 1) {
-                return first;
+                return List.of(first);
+            }
+            ResourceLocation id = mergedId != null ? mergedId : first.id();
+            String owner = mergedId != null ? null : first.owner();
+            if (all.stream().anyMatch(FluidInteractionRecipe::isLockstep) || all.stream().map(FluidInteractionRecipe::results).distinct().count() > 1) {
+                List<FluidInteractionRecipe> rows = LockstepMerger.rows(all);
+                return rows.size() > LockstepMerger.MAX_ROWS ? all : List.of(LockstepMerger.build(all, rows, id, owner));
             }
             inertSources.removeAll(sources);
             inertNeighbors.removeAll(neighbors);
-            return new FluidInteractionRecipe(first.sourceType(), mergedId != null ? mergedId : first.id(),
+            return List.of(new FluidInteractionRecipe(first.sourceType(), id,
                     List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
-                    first.conditions(), first.results(), null, mergedId != null ? null : first.owner(),
-                    new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)));
+                    first.conditions(), first.results(), null, owner,
+                    new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors))));
         }
     }
 }

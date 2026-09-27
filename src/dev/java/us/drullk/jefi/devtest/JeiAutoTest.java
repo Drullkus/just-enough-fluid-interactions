@@ -5,10 +5,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -19,6 +21,7 @@ import org.slf4j.Logger;
 
 import us.drullk.jefi.Config;
 import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.FluidInteractionCategory;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.InertFormIndicator;
 import us.drullk.jefi.jei.ItemlessBlock;
@@ -29,13 +32,17 @@ import us.drullk.jefi.jei.probe.RecipeIds;
 import us.drullk.jefi.jei.probe.RuleProber;
 import us.drullk.jefi.jei.scene.SceneArrangement;
 import us.drullk.jefi.jei.scene.SceneVariant;
+import us.drullk.jefi.jei.scene.SceneView;
+import us.drullk.jefi.jei.scene.SlotLookup;
 import com.mojang.logging.LogUtils;
 
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
+import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.IFocus;
+import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
@@ -97,7 +104,7 @@ public final class JeiAutoTest {
             ResourceLocation.fromNamespaceAndPath(BOP, "flesh"),
             ResourceLocation.fromNamespaceAndPath(BOP, "porous_flesh"));
 
-    /** The test also screenshots every recipe whose id contains this text. */
+    /** The test also screenshots every recipe whose id contains one of these comma-separated texts. */
     private static final @Nullable String SHOTS_FILTER = normalizeFilter(System.getProperty("justenoughfluidinteractions.shots"));
 
     private static int shot;
@@ -111,6 +118,7 @@ public final class JeiAutoTest {
     private static @Nullable FluidInteractionRecipe offsetRecipe;
     private static @Nullable FluidInteractionRecipe preemptedRecipe;
     private static @Nullable FluidInteractionRecipe blocklessRecipe;
+    private static @Nullable FluidInteractionRecipe withinRecipe;
 
     /** The recipes that get a screenshot of their own, in this order. Each is read when its step runs. */
     private static final List<Shot> SHOTS = List.of(
@@ -120,7 +128,9 @@ public final class JeiAutoTest {
             new Shot("cascade", () -> cascadeRecipe),
             new Shot("offset", () -> offsetRecipe),
             new Shot("preempted", () -> preemptedRecipe),
-            new Shot("blockless", () -> blocklessRecipe, true));
+            new Shot("blockless", () -> blocklessRecipe, true),
+            new Shot("merged_within", () -> withinRecipe),
+            new Shot("merged_within_later", () -> withinRecipe));
 
     private static final TickSteps STEPS = steps();
 
@@ -194,12 +204,14 @@ public final class JeiAutoTest {
         recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
         LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
         if (SHOTS_FILTER != null) {
-            customShots = recipes.stream().filter(recipe -> recipe.id().toString().contains(SHOTS_FILTER)).toList();
+            List<String> texts = List.of(SHOTS_FILTER.split(","));
+            customShots = recipes.stream().filter(recipe -> texts.stream().anyMatch(recipe.id().toString()::contains)).toList();
             LOGGER.info("{} shots: {} recipe(s) match \"{}\"", PREFIX, customShots.size(), SHOTS_FILTER);
         }
         checkAlternatives(recipes);
         checkMerging(recipes);
         checkMergedAcrossMods(recipes);
+        checkMergedWithinMod(recipes);
         checkFlowingNeighbor(recipes);
         checkSpreadRecipe(recipes);
         checkOwnerOrder(recipes);
@@ -420,6 +432,162 @@ public final class JeiAutoTest {
         LOGGER.info("Smoke test merged across mods {} (from {}): {} neighbor fluid(s) from {}, apart from {} (from {}) beside {}",
                 merged.id(), merged.owner(), fluidCount(merged), namespaces,
                 block.id(), block.owner(), block.neighbors().stream().map(JeiAutoTest::alternativeKey).toList());
+    }
+
+    /** Every slot of a lockstep recipe shows the same row, also under a focus. */
+    private static void checkMergedWithinMod(List<FluidInteractionRecipe> found) {
+        IJeiRuntime runtime = FluidInteractionsJeiPlugin.runtime();
+        if (runtime == null) {
+            return;
+        }
+        List<FluidInteractionRecipe> lockstep = found.stream().filter(FluidInteractionRecipe::isLockstep).toList();
+        for (FluidInteractionRecipe recipe : lockstep) {
+            List<String> offenders = new ArrayList<>();
+            String summary = checkLockstep(runtime, recipe, offenders);
+            if (offenders.isEmpty()) {
+                LOGGER.info("Smoke test merged within a mod {} (from {}): {}", recipe.id(), recipe.owner(), summary);
+            } else {
+                LOGGER.error("Smoke test merged within a mod {} (from {}) is out of step: {}", recipe.id(), recipe.owner(), offenders);
+            }
+        }
+        withinRecipe = lockstep.stream()
+                .filter(recipe -> PackRun.ACTIVE || AutoTestConfig.LOCKSTEP_MOD.equals(recipe.owner()))
+                .findFirst()
+                .orElse(null);
+        if (PackRun.ACTIVE) {
+            LOGGER.info("Smoke test merged within a mod: {} lockstep recipe(s)", lockstep.size());
+            return;
+        }
+        List<FluidInteractionRecipe> own = lockstep.stream().filter(recipe -> AutoTestConfig.LOCKSTEP_MOD.equals(recipe.owner())).toList();
+        FluidInteractionRecipe recipe = own.size() == 1 ? own.getFirst() : null;
+        long sources = recipe == null ? 0 : recipe.rows().stream().map(row -> row.sourceFluids().getFirst()).distinct().count();
+        long results = recipe == null ? 0 : recipe.rows().stream().map(FluidInteractionRecipe::resultAtSource).distinct().count();
+        if (recipe == null || sources < 2 || results < 2) {
+            LOGGER.error("Smoke test expected one lockstep recipe of {} with several sources and results, found {} with {} source(s) and {} result(s)",
+                    AutoTestConfig.LOCKSTEP_MOD, own.size(), sources, results);
+        }
+    }
+
+    /** The rows each linked slot holds, the scene against the slots while they cycle, and a focus on one result. */
+    private static String checkLockstep(IJeiRuntime runtime, FluidInteractionRecipe recipe, List<String> offenders) {
+        IRecipeCategory<FluidInteractionRecipe> category = runtime.getRecipeManager().getRecipeCategory(FluidInteractionsJeiPlugin.TYPE);
+        IRecipeLayoutDrawable<FluidInteractionRecipe> layout = runtime.getRecipeManager()
+                .createRecipeLayoutDrawable(category, recipe, runtime.getJeiHelpers().getFocusFactory().getEmptyFocusGroup())
+                .orElse(null);
+        if (layout == null) {
+            offenders.add("no layout");
+            return "";
+        }
+        List<FluidInteractionRecipe> rows = FluidInteractionCategory.visibleRows(runtime.getJeiHelpers().getIngredientVisibility(), recipe);
+        Map<String, Function<FluidInteractionRecipe, Placement>> linked = linkedEntries(recipe);
+        IRecipeSlotsView view = layout.getRecipeSlotsView();
+        for (var entry : linked.entrySet()) {
+            IRecipeSlotView slot = view.findSlotByName(entry.getKey()).orElse(null);
+            List<ITypedIngredient<?>> held = slot == null ? List.of() : slot.getAllIngredientsList();
+            if (held.size() != rows.size()) {
+                offenders.add(entry.getKey() + " holds " + held.size() + " of " + rows.size() + " row(s)");
+                continue;
+            }
+            for (int i = 0; i < held.size(); i++) {
+                ITypedIngredient<?> typed = held.get(i);
+                if (typed == null || !SceneArrangement.shows(entry.getValue().apply(rows.get(i)), typed.getIngredient())) {
+                    offenders.add(entry.getKey() + " entry " + i + " is not row " + i);
+                }
+            }
+        }
+        Set<Integer> seen = new LinkedHashSet<>();
+        int steps = Math.min(rows.size(), 6) + 1;
+        for (int step = 0; step < steps; step++) {
+            seen.add(sceneMatchesSlots(recipe, view, offenders, "step " + step));
+            for (int tick = 0; tick < 20; tick++) {
+                layout.tick();
+            }
+        }
+        IRecipeSlotView result = view.findSlotByName(SlotLookup.result(0)).orElse(null);
+        List<ITypedIngredient<?>> results = result == null ? List.of() : result.getAllIngredientsList();
+        String focusText = "no focus";
+        if (!results.isEmpty() && results.getLast() != null) {
+            ITypedIngredient<?> focused = results.getLast();
+            IFocusGroup focus = runtime.getJeiHelpers().getFocusFactory()
+                    .createFocusGroup(List.of(runtime.getJeiHelpers().getFocusFactory().createFocus(RecipeIngredientRole.OUTPUT, focused)));
+            IRecipeLayoutDrawable<FluidInteractionRecipe> narrowed = runtime.getRecipeManager()
+                    .createRecipeLayoutDrawable(category, recipe, focus).orElse(null);
+            Set<Integer> focusRows = new LinkedHashSet<>();
+            if (narrowed == null) {
+                offenders.add("no layout under the focus");
+            } else {
+                for (int step = 0; step < 3; step++) {
+                    int row = sceneMatchesSlots(recipe, narrowed.getRecipeSlotsView(), offenders, "focus step " + step);
+                    focusRows.add(row);
+                    Placement shown = Placement.ofBlock(recipe.rows().get(row).results().get(List.copyOf(recipe.results().keySet()).getFirst()));
+                    if (!SceneArrangement.shows(shown, focused.getIngredient())) {
+                        offenders.add("the focus on " + focused.getIngredient() + " shows row " + row);
+                    }
+                    for (int tick = 0; tick < 20; tick++) {
+                        narrowed.tick();
+                    }
+                }
+            }
+            focusText = "the focus on " + resultKey(rows.getLast().results().get(List.copyOf(recipe.results().keySet()).getFirst()))
+                    + " shows row(s) " + focusRows;
+        }
+        long members = recipe.rows().stream().map(FluidInteractionRecipe::id).distinct().count();
+        return recipe.rows().size() + " row(s) of " + members + " member(s), " + rows.size() + " shown, linked slot(s) " + linked.keySet()
+                + ", " + steps + " cycle step(s) with the scene on row(s) " + seen + ", " + focusText + ", rows "
+                + recipe.rows().stream().map(row -> row.sourceFluids().stream().map(fluid -> String.valueOf(BuiltInRegistries.FLUID.getKey(fluid))).toList()
+                        + " + " + row.neighbors().stream().map(JeiAutoTest::alternativeKey).distinct().toList()
+                        + " -> " + describe(row.results())).toList();
+    }
+
+    /** The entry of each linked slot for a row. */
+    private static Map<String, Function<FluidInteractionRecipe, Placement>> linkedEntries(FluidInteractionRecipe recipe) {
+        Map<String, Function<FluidInteractionRecipe, Placement>> entries = new LinkedHashMap<>();
+        if (!FluidInteractionRecipe.sharesSources(recipe.rows())) {
+            entries.put(SlotLookup.SOURCE, row -> Placement.ofFluid(row.sourceFluids().getFirst().defaultFluidState()));
+        }
+        if (!recipe.neighbors().isEmpty() && !FluidInteractionRecipe.sharesNeighbors(recipe.rows())) {
+            entries.put(SlotLookup.NEIGHBOR, row -> row.neighbors().getFirst());
+        }
+        List<BlockPos> conditions = List.copyOf(recipe.conditions().keySet());
+        for (int i = 0; i < conditions.size(); i++) {
+            BlockPos offset = conditions.get(i);
+            entries.put(SlotLookup.condition(i), row -> row.conditions().get(offset));
+        }
+        List<BlockPos> results = List.copyOf(recipe.results().keySet());
+        for (int i = 0; i < results.size(); i++) {
+            BlockPos offset = results.get(i);
+            entries.put(SlotLookup.result(i), row -> Placement.ofBlock(row.results().get(offset)));
+        }
+        return entries;
+    }
+
+    /** Every slot shows what the scene draws at its offset. Returns the scene's row. */
+    private static int sceneMatchesSlots(FluidInteractionRecipe recipe, IRecipeSlotsView view, List<String> offenders, String when) {
+        SceneVariant variant = SceneView.variant(recipe, view, false);
+        Map<BlockPos, Placement> before = SceneArrangement.of(recipe, variant);
+        Map<BlockPos, Placement> after = SceneArrangement.of(recipe, variant.otherPhase());
+        Map<String, Placement> expected = new LinkedHashMap<>();
+        expected.put(SlotLookup.SOURCE, before.get(BlockPos.ZERO));
+        if (!recipe.neighbors().isEmpty()) {
+            expected.put(SlotLookup.NEIGHBOR, before.get(recipe.neighborOffset()));
+        }
+        List<BlockPos> conditions = List.copyOf(recipe.conditions().keySet());
+        for (int i = 0; i < conditions.size(); i++) {
+            expected.put(SlotLookup.condition(i), before.get(conditions.get(i)));
+        }
+        List<BlockPos> results = List.copyOf(recipe.results().keySet());
+        for (int i = 0; i < results.size(); i++) {
+            expected.put(SlotLookup.result(i), after.get(results.get(i)));
+        }
+        expected.forEach((name, placement) -> {
+            IRecipeSlotView slot = view.findSlotByName(name).orElse(null);
+            ITypedIngredient<?> shown = slot == null ? null : slot.getDisplayedIngredient().orElse(null);
+            if (shown == null || placement == null || !SceneArrangement.shows(placement, shown.getIngredient())) {
+                offenders.add(when + ": " + name + " shows " + (shown == null ? null : shown.getIngredient()) + ", the scene "
+                        + (placement == null ? null : placement.describe().getString()));
+            }
+        });
+        return variant.row();
     }
 
     private static long fluidCount(FluidInteractionRecipe recipe) {
@@ -1090,7 +1258,7 @@ public final class JeiAutoTest {
     /** The dev fluid waterlogs blocks below it; none of that is a recipe. */
     private static void checkWaterlog(List<FluidInteractionRecipe> found) {
         List<String> offenders = new ArrayList<>();
-        for (FluidInteractionRecipe recipe : found) {
+        for (FluidInteractionRecipe recipe : found.stream().flatMap(listed -> listed.rowsOrSelf().stream()).toList()) {
             recipe.results().forEach((offset, result) -> {
                 if (placedAt(recipe, offset).stream().anyMatch(placed -> onlyFluidDiffers(placed, result))) {
                     offenders.add(recipe.id() + " " + Texts.offset(offset).getString() + " " + result);
@@ -1185,7 +1353,8 @@ public final class JeiAutoTest {
                 + ", conditions " + recipe.conditions().entrySet().stream()
                         .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue().block()).toList()
                 + ", results " + recipe.results().entrySet().stream()
-                        .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue()).toList();
+                        .map(entry -> entry.getKey().toShortString() + "=" + entry.getValue()).toList()
+                + (recipe.isLockstep() ? ", " + recipe.rows().size() + " row(s)" : "");
     }
 
     /** One line per run naming the exact ordered id list, so consecutive runs can be compared with one grep. */

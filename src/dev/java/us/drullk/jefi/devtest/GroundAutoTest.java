@@ -132,7 +132,7 @@ public final class GroundAutoTest {
         List<GroundCheck.Alternative> all = GroundCheck.alternatives(recipes);
         List<GroundCheck.Alternative> placeable = all.stream().filter(GroundCheck::placeable).toList();
         skipped = all.size() - placeable.size();
-        recipeCount = (int) placeable.stream().map(GroundCheck.Alternative::recipe).distinct().count();
+        recipeCount = (int) placeable.stream().map(GroundCheck.Alternative::listed).distinct().count();
         LOGGER.info("{} found {} recipe(s) with {} alternative(s), {} of them holding a fluid no level can hold",
                 PREFIX, recipes.size(), all.size(), skipped);
         all.stream().filter(alternative -> !GroundCheck.placeable(alternative))

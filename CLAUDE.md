@@ -114,8 +114,8 @@ GitHub Packages credentials are Gradle properties in the user's global
   - `-Ppack=<name>` runs the pack in `test-pack/<name>` instead. The run copies only `*.jar`.
   - `-PpackHeap=<size>` sets the heap of a pack run, default `12g`. The Everything pack needs
     about 10 GB.
-  - `-Pshots=<text>` also screenshots every recipe whose id contains the text. Each shot logs
-    the tooltips of its output slots.
+  - `-Pshots=<text>,<text>` also screenshots every recipe whose id contains one of the
+    texts. Each shot logs the tooltips of its output slots.
   - Run one pack client at a time on this machine.
 - A profile: `-Pjfr=<file>` on a pack run records a JFR profile.
   - Set `JAVA_TOOL_OPTIONS="-XX:FlightRecorderOptions=stackdepth=192"` for the run. A
@@ -149,6 +149,8 @@ Plugin code is under `us/drullk/jefi/jei/` in `probe`, `sandbox` and `scene`.
     the probe and before the merge.
   - `mergeAcrossMods`, default basalt, cobblestone, obsidian: recipes that make only these
     blocks merge across mods (`RecipeMerger`).
+  - `mergeWithinMods`, default `alltheores`, `colouredstuff`, `create_dragons_plus`, `mingle`:
+    recipes of these mods merge into rows that cycle together (`LockstepMerger`).
   - `ignoredFluids`, default `fun_fluids:flood`: the probe skips each listed fluid and every
     fluid that `isSame` with it, as a source and as a candidate. An existing file keeps its value.
   - `probeThreads`, `probeStallSeconds`: size and guard the pool.
@@ -164,9 +166,11 @@ Development-only classes bound to the mod for runs, never packaged.
   `FIXTURES` flag, true under any of the three properties.
 - `TickSteps`: runs each test as a list of steps on the client tick.
 - `EmiAutoTestSteps`: every EMI reference, so no other run loads EMI classes.
-- `GroundCheck`: builds one recipe alternative in a real level and compares it.
+- `GroundCheck`: builds one recipe alternative in a real level and compares it. Each row of
+  a lockstep recipe is grounded as a recipe of its own.
 - `AutoTestConfig`: sets `hideUnprocessable` to false in memory when the client config loads
-  in a test run. The file on disk keeps its value.
+  in a test run. The file on disk keeps its value. Outside a pack it also adds `gaiadimension`
+  to `mergeWithinMods`.
 - `PackRun`: clears `SharedConstants.IS_RUNNING_IN_IDE` for pack runs. NeoForge's gametest
   scan loads every mod's gametest classes in a dev run.
 - `JeiAutoTestInteractions`: the dev-only interactions. One writes a potted poppy, a block
@@ -208,6 +212,13 @@ Development-only classes bound to the mod for runs, never packaged.
 - Under EMI only `IRecipeCategory.handleInput` is called. It is deprecated since JEI 19.6.0;
   JEI 19.53, EMI and TMRV still call it. So the category keeps a per-recipe `SceneRotation`.
 - Under TMRV scenes show the first alternative and rotate by click.
+- A lockstep recipe (`FluidInteractionRecipe.rows`) holds one entry per row in each linked slot.
+  - `createFocusLink` joins the linked slots. JEI throws when their counts differ.
+  - A source or neighbor list that every row shares is a free slot. It cycles on its own.
+  - A row with an entry that JEI hides stays out of every slot.
+  - JEMI ignores focus links and cycles equal slots in step. A static scene shows row
+    `seconds % size`, EMI's clock.
+  - EMI shows a tag in place of entries that fill it. Under EMI such a group stays apart.
 - `InertFormIndicator`: an `IRecipeWidget` per input slot whose fluid has an inert other form
   in `FluidInteractionRecipe.inert`. It draws a yellow "!" at the slot's top-left each frame.
   JEI draws a small triple bar there before a slot cycles. The slot's yellow line explains it.
@@ -234,6 +245,8 @@ Development-only classes bound to the mod for runs, never packaged.
 
 ### Scenes
 
+- A lockstep recipe draws the row its slots show (`SceneArrangement.rowIndex`,
+  `SceneVariant.row`). Rows that show the same entries draw the first row.
 - Everything in `scene/` runs on the render thread. Vertex buffers are created and closed there.
 - `SceneBakery` pushes and pops the pose around each block tesselation. Vanilla's
   `ModelBlockRenderer.tesselateBlock` translates by the block's random model offset without a
@@ -404,6 +417,13 @@ Development-only classes bound to the mod for runs, never packaged.
     or block, in place of its owner, in both passes.
   - The first pass keys on the source type. The second pass unions the source fluids.
   - A merge of several owners has no owner. Its numbers count only the merges in the pack.
+- `LockstepMerger` is the third pass. It merges recipes of one `mergeWithinMods` owner with one
+  shape: tier, offsets, source forms and neighbor kinds.
+  - The first two passes compare a fluid result by its still form. Members whose exact results
+    differ become rows.
+  - A group of more than 100 rows splits by neighbor entries, then by source fluids. Each part
+    that fits merges. JEI shows at most 100 entries per slot.
+  - Rows drop only exact repeats.
 
 ## Verifying changes
 
@@ -474,13 +494,15 @@ One each unless stated.
 - `waterlog`: no result differs from its placed block only in its fluid. `hardening_brine`
   has one spread recipe.
 - `blockless`: the potted poppy slot holds an `ItemlessBlock`, and a focus on it finds the recipe.
+- `merged within a mod`: the gaiadimension lockstep recipe, 0 rows out of step while the
+  slots cycle and under a focus on one result.
 - `recipe ids <sha-256>`: must not change between runs of one checkout.
 
 ### The other two runs
 
-- EMI: `EMI test found N recipe(s)` with the JEI run's count, six `EMI test screenshot`
-  lines, one `EMI test clicked the left scene` line, one `EMI test blockless` line, no
-  `Exception adding JEMI extras`.
+- EMI: `EMI test found N recipe(s)` with the JEI run's count, seven `EMI test screenshot`
+  lines, one `EMI test clicked the left scene` line, one `EMI test blockless` line, one
+  `EMI test merged within a mod` line, no `Exception adding JEMI extras`.
 - Grounding: `Grounded N recipe alternative(s) of M recipe(s): 0 mismatch(es)`, with `0 of
   them holding a fluid no level can hold`, and no `Grounding mismatch` line.
 
@@ -492,4 +514,6 @@ One each unless stated.
 - `_preempted.png`: the source slot over the wrapped observation text.
 - `_offset.png`: a grid-aligned water cube around the offset dripstone.
 - `_blockless.png`: water and a flower pot, a potted poppy in the output slot.
+- `_merged_within.png`, `_merged_within_later.png`: one lockstep recipe at two rows. The scene
+  matches the slots.
 - Crop and enlarge with `sips` or PIL when a detail matters.
