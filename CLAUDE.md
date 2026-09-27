@@ -289,8 +289,10 @@ Development-only classes bound to the mod for runs, never packaged.
   - A tier that throws on the pool runs again on the calling thread, and every later tier too.
   - A thread without progress for `probeStallSeconds` counts as such a failure.
     Progress is a candidate run or a settle.
-- Fluids without a block never enter the probe (`FluidBlocks.hasBlock`). Every candidate list
-  holds only fluids with a block.
+- Fluids without a block of their own never enter the probe (`FluidBlocks.hasBlock`).
+  - The block must hold that same fluid. A mixin can give a placeholder fluid another fluid's
+    block: Create: Wizardry does it for Iron's Spells' blood.
+  - Every candidate list holds only fluids with a block of their own.
 - The registry tier (`RegistryProber`), per source form:
   - the fluid at `ORIGIN`, the predicate and the action with every fluid candidate in both
     forms beside it, then with every block;

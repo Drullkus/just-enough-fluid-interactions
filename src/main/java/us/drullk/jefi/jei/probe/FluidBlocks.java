@@ -1,33 +1,43 @@
 package us.drullk.jefi.jei.probe;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+
+import com.mojang.logging.LogUtils;
+
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidType;
 
-/**
- * Whether a level can hold a fluid at all.
- *
- * <p>A fluid registered without a block of its own exists only in a bucket or a tank. No level can ever come
- * into a state that holds it. So no rule keyed on it runs anywhere, and no tier can probe it. Every tier asks
- * this before it offers a fluid as a source or as a candidate.
- */
+/** Only a fluid whose own block holds it can exist in a level. */
 public final class FluidBlocks {
-    /** The answer per type. The fluid registry is frozen before any probe runs, so an answer never changes. */
+    private static final Logger LOGGER = LogUtils.getLogger();
+    /** The cached answer per fluid type, fixed once the registry freezes. */
     private static final Map<FluidType, Boolean> BY_TYPE = new ConcurrentHashMap<>();
+
+    static {
+        logMismatchedBlocks();
+    }
 
     private FluidBlocks() {
     }
 
-    /** Whether the fluid has a block of its own, which is the block its default state turns into. */
+    /** True only when the fluid's legacy block reports back that same fluid. */
     public static boolean hasBlock(Fluid fluid) {
-        return !fluid.defaultFluidState().createLegacyBlock().isAir();
+        BlockState block = fluid.defaultFluidState().createLegacyBlock();
+        if (block.isAir()) {
+            return false;
+        }
+        return block.getFluidState().getType().isSame(fluid);
     }
 
-    /** Whether any fluid of the type has a block. Only such a block lets the type stand anywhere at all. */
+    /** True when any fluid of the type has its own block. */
     public static boolean hasBlock(FluidType type) {
         return BY_TYPE.computeIfAbsent(type, FluidBlocks::scan);
     }
@@ -39,5 +49,19 @@ public final class FluidBlocks {
             }
         }
         return false;
+    }
+
+    /** Reports the fluids a non-air legacy block disqualifies for holding a different fluid. */
+    private static void logMismatchedBlocks() {
+        List<String> mismatched = new ArrayList<>();
+        for (Fluid fluid : BuiltInRegistries.FLUID) {
+            if (fluid == Fluids.EMPTY) {
+                continue;
+            }
+            if (!fluid.defaultFluidState().createLegacyBlock().isAir() && !hasBlock(fluid)) {
+                mismatched.add(BuiltInRegistries.FLUID.getKey(fluid).toString());
+            }
+        }
+        LOGGER.debug("Skipped {} fluid(s) whose block holds a different fluid: {}", mismatched.size(), mismatched);
     }
 }
