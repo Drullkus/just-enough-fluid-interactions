@@ -85,6 +85,8 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 def packName = project.findProperty('pack')
 def packRoot = packName ? "test-pack/${packName}" : 'test-pack'
 def packHeap = project.findProperty('packHeap') ?: '12g'
+// -Pmute mutes the plain client runs. The test runs below mute themselves.
+def mute = project.hasProperty('mute')
 
 neoForge {
     // Specify the version of NeoForge to use.
@@ -107,6 +109,9 @@ neoForge {
             client()
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            if (mute) {
+                systemProperty 'justenoughfluidinteractions.mute', 'true'
+            }
         }
 
         server {
@@ -128,6 +133,7 @@ neoForge {
         clientJeiTest {
             client()
             systemProperty 'justenoughfluidinteractions.jeiautotest', 'true'
+            systemProperty 'justenoughfluidinteractions.mute', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 
@@ -138,6 +144,7 @@ neoForge {
             client()
             sourceSet = sourceSets.dev
             systemProperty 'justenoughfluidinteractions.emiautotest', 'true'
+            systemProperty 'justenoughfluidinteractions.mute', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 
@@ -147,6 +154,7 @@ neoForge {
         clientGroundTest {
             client()
             systemProperty 'justenoughfluidinteractions.groundtest', 'true'
+            systemProperty 'justenoughfluidinteractions.mute', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
         }
 
@@ -163,6 +171,9 @@ neoForge {
             gameDirectory = project.file("${packRoot}/run")
             systemProperty 'justenoughfluidinteractions.pack', 'true'
             systemProperty 'neoforge.enableGameTest', 'false'
+            if (mute) {
+                systemProperty 'justenoughfluidinteractions.mute', 'true'
+            }
             jvmArgument "-Xmx${packHeap}"
             if (project.hasProperty('jfr')) {
                 jvmArgument "-XX:StartFlightRecording=settings=profile,duration=600s,filename=${project.property('jfr')}"
@@ -175,6 +186,7 @@ neoForge {
             systemProperty 'justenoughfluidinteractions.pack', 'true'
             systemProperty 'neoforge.enableGameTest', 'false'
             systemProperty 'justenoughfluidinteractions.jeiautotest', 'true'
+            systemProperty 'justenoughfluidinteractions.mute', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
             jvmArgument "-Xmx${packHeap}"
             if (project.hasProperty('jfr')) {

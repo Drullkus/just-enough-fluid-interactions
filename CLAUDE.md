@@ -35,6 +35,8 @@ the handoff, and every message to the user.
   the task commit. An agent in a worktree edits neither and reports its doc findings.
 - Before a worktree goes, look for changes under the gitignored `dev/`, `run/` and `test-pack/`.
   Report them first.
+- Every client an agent launches is muted. All test runs must mute themselves; add `-Pmute` to
+  `runClient` and `runClientPack`.
 - No mixins. Access transformers are acceptable (`META-INF/accesstransformer.cfg`).
 - This file holds no value that goes stale: versions, hashes, file ids, counts, timings. Point
   at the file that holds it. Numbers belong in the handoff.
