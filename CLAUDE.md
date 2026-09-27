@@ -111,6 +111,11 @@ GitHub Packages credentials are Gradle properties in the user's global
   - FML picks the newest copy of a mod that is both on the dev classpath and in the pack, so
     the dev copy of the pack is not the Prism instance.
   - `./gradlew runClientPack` is the plain client in the pack.
+  - `-Ppack=<name>` runs the pack in `test-pack/<name>` instead. The run copies only `*.jar`.
+  - `-PpackHeap=<size>` sets the heap of a pack run, default `12g`. The Everything pack needs
+    about 10 GB.
+  - `-Pshots=<text>` also screenshots every recipe whose id contains the text.
+  - Run one pack client at a time on this machine.
 - A profile: `-Pjfr=<file>` on a pack run records a JFR profile.
   - Set `JAVA_TOOL_OPTIONS="-XX:FlightRecorderOptions=stackdepth=192"` for the run. A
     recording keeps 64 frames per stack by default, and the probe's stacks are deeper.

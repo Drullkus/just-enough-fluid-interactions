@@ -88,8 +88,13 @@ public final class JeiAutoTest {
             ResourceLocation.fromNamespaceAndPath(BOP, "flesh"),
             ResourceLocation.fromNamespaceAndPath(BOP, "porous_flesh"));
 
+    /** The test also screenshots every recipe whose id contains this text. */
+    private static final @Nullable String SHOTS_FILTER = normalizeFilter(System.getProperty("justenoughfluidinteractions.shots"));
+
     private static int shot;
     private static List<FluidInteractionRecipe> recipes = List.of();
+    private static List<FluidInteractionRecipe> customShots = List.of();
+    private static int customShot;
     private static @Nullable FluidInteractionRecipe spreadRecipe;
     private static @Nullable FluidInteractionRecipe formRecipe;
     private static @Nullable FluidInteractionRecipe neighborRecipe;
@@ -136,6 +141,10 @@ public final class JeiAutoTest {
                 }
             });
         }
+        steps.after(10, JeiAutoTest::showFirstCustomShot)
+                .after(25, mc -> {
+                })
+                .repeat(25, JeiAutoTest::nextCustomShot);
         return steps.after(10, mc -> {
             LOGGER.info("Smoke test finished, stopping the client");
             mc.stop();
@@ -169,6 +178,10 @@ public final class JeiAutoTest {
         }
         recipes = runtime.getRecipeManager().createRecipeLookup(FluidInteractionsJeiPlugin.TYPE).get().toList();
         LOGGER.info("Smoke test found {} fluid interaction recipe(s)", recipes.size());
+        if (SHOTS_FILTER != null) {
+            customShots = recipes.stream().filter(recipe -> recipe.id().toString().contains(SHOTS_FILTER)).toList();
+            LOGGER.info("{} shots: {} recipe(s) match \"{}\"", PREFIX, customShots.size(), SHOTS_FILTER);
+        }
         checkAlternatives(recipes);
         checkMerging(recipes);
         checkFlowingNeighbor(recipes);
@@ -221,6 +234,33 @@ public final class JeiAutoTest {
         if (shot.recipe().get() != null) {
             grab(mc, shot.name());
         }
+    }
+
+    private static void showFirstCustomShot(Minecraft mc) {
+        if (!customShots.isEmpty()) {
+            show(List.of(customShots.getFirst()));
+        }
+    }
+
+    /** Screenshots the shown recipe and shows the next match. False when no match is left. */
+    private static boolean nextCustomShot(Minecraft mc) {
+        if (customShot < customShots.size()) {
+            grab(mc, "shot_" + sanitize(customShots.get(customShot).id().toString()));
+            customShot++;
+        }
+        if (customShot >= customShots.size()) {
+            return false;
+        }
+        show(List.of(customShots.get(customShot)));
+        return true;
+    }
+
+    private static String sanitize(String id) {
+        return id.replace(':', '_').replace('/', '_');
+    }
+
+    private static @Nullable String normalizeFilter(@Nullable String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     /** Neighbor alternatives cycle in a JEI slot, so a repeated one is a defect rather than a display choice. */

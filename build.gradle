@@ -81,6 +81,11 @@ base {
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+// -Ppack=<name> runs the pack in test-pack/<name>. -PpackHeap=<size> sets the -Xmx of a pack run.
+def packName = project.findProperty('pack')
+def packRoot = packName ? "test-pack/${packName}" : 'test-pack'
+def packHeap = project.findProperty('packHeap') ?: '12g'
+
 neoForge {
     // Specify the version of NeoForge to use.
     version = project.neo_version
@@ -149,14 +154,16 @@ neoForge {
         // the run's own mods folder, so syncTestPack copies the pack there without this mod's own jar, which
         // the run already has from the source sets. clientPack is a plain client; clientPackTest is the JEI
         // smoke test in the pack, which creates a world, probes, and exits. -Pjfr=<file> records a JFR profile.
+        // -Pshots=<text> also screenshots every recipe whose id contains that text.
         // NeoForge's gametest scan loads every mod's gametest classes, and a pack mod's tests can reference
         // mods the pack lacks. Two switches turn the scan off: the property the client template sets, and the
         // in-IDE flag, which the dev source set's PackRun clears for the pack property.
         clientPack {
             client()
-            gameDirectory = project.file('test-pack/run')
+            gameDirectory = project.file("${packRoot}/run")
             systemProperty 'justenoughfluidinteractions.pack', 'true'
             systemProperty 'neoforge.enableGameTest', 'false'
+            jvmArgument "-Xmx${packHeap}"
             if (project.hasProperty('jfr')) {
                 jvmArgument "-XX:StartFlightRecording=settings=profile,duration=600s,filename=${project.property('jfr')}"
             }
@@ -164,13 +171,17 @@ neoForge {
 
         clientPackTest {
             client()
-            gameDirectory = project.file('test-pack/run')
+            gameDirectory = project.file("${packRoot}/run")
             systemProperty 'justenoughfluidinteractions.pack', 'true'
             systemProperty 'neoforge.enableGameTest', 'false'
             systemProperty 'justenoughfluidinteractions.jeiautotest', 'true'
             programArguments.addAll '--width', '1280', '--height', '720'
+            jvmArgument "-Xmx${packHeap}"
             if (project.hasProperty('jfr')) {
                 jvmArgument "-XX:StartFlightRecording=settings=profile,duration=600s,filename=${project.property('jfr')}"
+            }
+            if (project.hasProperty('shots')) {
+                systemProperty 'justenoughfluidinteractions.shots', project.property('shots')
             }
         }
 
@@ -219,8 +230,11 @@ neoForge {
 // a dependency that will be present for runtime testing but that is
 // "optional", meaning it will not be pulled by dependents of this mod.
 tasks.register('syncTestPack', Sync) {
-    from 'test-pack/mods'
-    into 'test-pack/run/mods'
+    // A Prism mods folder also holds *.jar.disabled files.
+    from(packRoot + '/mods') {
+        include '*.jar'
+    }
+    into "${packRoot}/run/mods"
     exclude 'justenoughfluidinteractions-*.jar'
     // A mixin of the bundled Accessories mod targets a compiled lambda name, and a development run's
     // recompiled Minecraft numbers its lambdas differently. Deep Aether requires the Aether.
