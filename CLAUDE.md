@@ -1,528 +1,113 @@
 # Just Enough Fluid Interactions
 
 A NeoForge 1.21.1 mod with one feature: a JEI plugin that shows fluid interactions as recipes.
-It shows three kinds of rule:
+It runs three kinds of rule in a sandbox level:
 
-- every `FluidInteractionRegistry` entry;
-- the hardening code a fluid implements in its own spread code, such as vanilla's stone in
-  `LavaFluid.spreadTo`;
-- the code a `LiquidBlock` subclass implements in its update hooks.
+- every `FluidInteractionRegistry` entry (the registry tier);
+- the hardening code in a fluid's own spread code, such as `LavaFluid.spreadTo` (the spread tier);
+- the update hooks of a `LiquidBlock` subclass (the neighbor tier).
 
-The plugin finds all three by running them in a sandbox level. It then settles every hit in
-that sandbox with the semantics of a real level. Gander renders the results as 3D scenes.
+The tiers only find candidates. The settle step builds every hit with the semantics of a real
+level and decides the result. Gander draws the results as 3D scenes.
 
 ## Language: ASD-STE100
 
-All writing follows ASD-STE100, Simplified Technical English: text in the mod, javadoc,
-comments, commit messages, this file, the handoff, and every message to the user.
+All writing follows ASD-STE100: text in the mod, javadoc, comments, commit messages, this file,
+the handoff, and every message to the user.
 
-- Present tense and active voice. One topic per sentence. About 20 words or fewer per sentence.
+- Present tense and active voice. One topic per sentence. About 20 words or fewer.
 - No "would", "should", "could" or "might". Use "can" for possibility and "must" for requirements.
-- Use concrete nouns (the fluid, the block), not abstractions (a level, a position, a write).
-- Keep the articles. Write two short sentences and not one sentence joined by "but".
+- Use concrete nouns (the fluid, the block). Keep the articles.
+- Write two short sentences, not one sentence joined by "but".
+- A comment states one invariant the code cannot express, in about 10 words. No examples, no
+  justification, no history of the change.
+- Text about another mod's behavior states the observation only: no "bug", "missing", "should".
 - Give agents a rendered example sentence, not a template.
-- In this file: one fact per bullet, nested lists instead of paragraphs, lines under 100 characters.
+- In this file: one fact per bullet, lines under 100 characters.
 
-## Versions
+## Rules
 
-- Minecraft 1.21.1, NeoForge 21.1.249, ModDevGradle 2.0.146, Gradle wrapper 9.2.1, Java 21.
-- Parchment 2024.11.17 for 1.21.1.
+- Never read, print or probe `~/.gradle/gradle.properties`. It holds the GitHub Packages
+  credentials.
+- Work happens on a `task/<slug>` branch in its own worktree. One commit, never on `main`,
+  never a push. The user cherry-picks.
+- The coordinating session writes this file and `dev/HANDOFF.md`. It amends the doc delta into
+  the task commit. An agent in a worktree edits neither and reports its doc findings.
+- Before a worktree goes, look for changes under the gitignored `dev/`, `run/` and `test-pack/`.
+  Report them first.
+- No mixins. Access transformers are acceptable (`META-INF/accesstransformer.cfg`).
+- This file holds no value that goes stale: versions, hashes, file ids, counts, timings. Point
+  at the file that holds it. Numbers belong in the handoff.
+- "Compiles" is not "done". Before you report a task complete: `./gradlew build`, the three dev
+  runs, and every check of "Verifying changes".
+
+## Build and runs
+
+- Versions are in `gradle.properties` and `build.gradle`. The target is Java 21. The default
+  JDK 25 runs the wrapper.
 - JEI is two file ids in `build.gradle`.
-  - `compileOnly` is the oldest supported release, the minimum of the `versionRange` in
-    `src/main/templates/META-INF/neoforge.mods.toml`.
+  - `compileOnly` is the oldest supported release: the minimum of `versionRange` in
+    `src/main/templates/META-INF/neoforge.mods.toml`. Raise them together.
   - `runtimeOnly` is a current release.
-  - Raise the minimum only together with the compile jar.
-- Gander `dev.compactmods.gander:{core,levels,rendering,ui}` from GitHub Packages, jar-in-jar.
-  - The version is `gander_version` in `gradle.properties`. The jar-in-jar range is `[0.2,1.0)`.
-  - Nothing resolves from the local Maven repository.
-- EMI (`maven.modrinth:emi`, version `emi_version` in `gradle.properties`).
-  - A dependency of the `dev` source set alone.
-  - Only the `clientEmiTest` run uses that source set's classpath. That keeps EMI out of
-    every other run.
-- Test mods on the dev classpath, declared in `build.gradle`, never shipped. They feed the
-  smoke test.
-  - Gaia Dimension: interactions and lava-tagged fluids.
-  - Create, Sable, Create Aeronautics.
-  - The Bumblezone with Resourceful Lib: the fixture of the neighbor tier and of the cascade.
-    Its sugar water hardens in a `LiquidBlock` subclass's `neighborChanged`. Its honey
-    crystal's `onPlace` rewrites adjacent water.
-  - DivineRPG: smoldering tar, a lava-tagged fluid with registry interactions and a `spreadTo`
-    copied from vanilla.
-  - Biomes O' Plenty with GlitchCore and TerraBlender (`localRuntime`): two interactions on
-    every fluid type. Its blood and liquid null are lava-tagged. Honey and royal jelly are the
-    first third-party pre-emption case.
-  - WorldEdit (`localRuntime`): for the plain client.
-- Mod id `justenoughfluidinteractions`, package `us.drullk.jefi`.
+- Gander comes from GitHub Packages and ships jar-in-jar. EMI is on the `dev` source set only.
+- Test mods on the dev classpath (`build.gradle`) feed the smoke test. They never ship.
+- `./gradlew runClientJeiTest`, `runClientEmiTest`, `runClientGroundTest`: the three dev runs,
+  about 30 s each. Each deletes its save, makes a flat world, checks, takes screenshots and exits.
+- `./gradlew runClientPackTest`: the smoke test in the pack `test-pack/mods` (gitignored).
+  - `-Ppack=<name>` runs `test-pack/<name>` instead. `-PpackHeap` sets the heap, default 12g.
+  - `-Pshots=<text>,<text>` screenshots every recipe whose id holds a text.
+  - `-Pjfr=<file>` records a profile. Print it with `jfr print --stack-depth 192`.
+  - A dev-check ERROR in a pack means nothing. Run one pack client at a time.
+- A worktree has no `test-pack`. Link `test-pack/mods` to the main checkout's copy.
+- An existing `run/config` file keeps its values when a config default changes.
 
-## Documentation
+## Code map
 
-- A comment states an invariant the code cannot express, and nothing else.
-  - No comment narrates what changed, why, or which task or session produced it.
-  - Delete such comments when you meet them.
-- Do not renumber, duplicate or invent task numbers anywhere.
-- The coordinating session writes `CLAUDE.md` and `dev/HANDOFF.md`.
-  - An agent in a worktree edits neither.
-  - It reports every doc-relevant finding in its final report: a task is done, an assumption
-    changed, a fact here is now wrong.
-- Keep this file free of facts that go stale on their own: the mod version, jar names, commit
-  hashes, dependency file ids, recipe counts, timings. Point at the file that holds the value.
-  Numbers belong in the handoff.
+Under `src/main/java/us/drullk/jefi/jei/`:
 
-## Agent workflow
+- `probe/InteractionProber.probeAll`: the coordinator. Read it first.
+- `RegistryProber`, and `RuleProber` with `SpreadProber` and `NeighborProber`: the three tiers.
+- `Settler`: builds each hit live in the sandbox. Its diff is the recipe.
+- `Candidates`, `FluidBlocks`, `RunMemo`, `Fixtures`: what the tiers place, and what they skip.
+- `RecipeMerger` (`mergeAcrossMods`) and `LockstepMerger` (`mergeWithinMods`): the merges.
+- `RecipeIds`: the id formats and orderings. Ids stay stable across launches; JEI bookmarks
+  use them.
+- `sandbox/SandboxLevel`: the level of every tier and of the settle.
+- `FluidInteractionCategory`, `ItemlessBlock*` and `scene/`: the JEI layout and the scenes.
+- `us/drullk/jefi/Config`: the client config. `src/dev`: the smoke tests and the dev fixtures.
+- Reference detail (tiers, sandbox, merges, ids, viewers) is in `dev/HANDOFF.md`, section 6b.
+  `dev/` is gitignored: a worktree agent reads the main checkout's copy.
 
-- Work happens on a task branch in its own worktree.
-  - One wrap-up commit per task. Never on `main`. Never a push.
-  - The user cherry-picks onto `main`.
-- A worktree has no `test-pack`. Link `test-pack/mods` to the main checkout's copy before a
-  pack run.
-- Remove a worktree when its task is complete, so the branch is the only record of the change.
-  - First look for changes under gitignored paths: `dev/`, `run/`, `test-pack/`.
-  - Those disappear with the worktree. Report them to the coordinating session and to the
-    user before you remove anything.
-- "Compiles" is not "done". Before you report a task complete:
-  - `./gradlew build`;
-  - the three dev runs of "Commands";
-  - every check of "Verifying changes".
+## Gotchas
 
-## Credentials
-
-GitHub Packages credentials are Gradle properties in the user's global
-`~/.gradle/gradle.properties`. Never read, print or probe that file or those values.
-
-## Commands
-
-- `./gradlew build`: the jar in `build/libs`, with `META-INF/jarjar/`. Old jars stay there.
-- `./gradlew compileJava compileDevJava`: compile only.
-- `./gradlew runClientJeiTest`: the JEI smoke test, about 30 s.
-  - Deletes the previous test save, creates a flat world, opens the category, exits.
-  - Writes `run/screenshots/jei_fluid_interactions_*.png`. Read the PNGs.
-- `./gradlew runClientEmiTest`: the same through EMI's JEMI bridge, about 30 s.
-  - Writes `run/screenshots/emi_fluid_interactions_*.png` and logs `EMI test ...` lines.
-- `./gradlew runClientGroundTest`: the grounding run, about 35 s, always exits 0.
-  - Rebuilds every recipe alternative on a bedrock slab in the integrated server's level, the
-    source last, waits past the fluid tick delays, and compares.
-  - The signal is the `Grounded ... mismatch(es)` line.
-- `./gradlew runClient`: the plain client.
-- `./gradlew runClientPackTest`: the JEI smoke test in the stress pack, about 3 min.
-  - The pack is `test-pack/mods`, a gitignored copy of the Prism instance "JEFI Stress Test".
-  - The run copies it into `test-pack/run/mods` without this mod's jar and without the two
-    Aether jars, whose bundled mixin targets a compiled lambda name a dev run does not have.
-  - The dev checks can log ERROR lines there. They mean nothing in a pack.
-  - FML picks the newest copy of a mod that is both on the dev classpath and in the pack, so
-    the dev copy of the pack is not the Prism instance.
-  - `./gradlew runClientPack` is the plain client in the pack.
-  - `-Ppack=<name>` runs the pack in `test-pack/<name>` instead. The run copies only `*.jar`.
-  - `-PpackHeap=<size>` sets the heap of a pack run, default `12g`. The Everything pack needs
-    about 10 GB.
-  - `-Pshots=<text>,<text>` also screenshots every recipe whose id contains one of the
-    texts. Each shot logs the tooltips of its output slots.
-  - Run one pack client at a time on this machine.
-- A profile: `-Pjfr=<file>` on a pack run records a JFR profile.
-  - Set `JAVA_TOOL_OPTIONS="-XX:FlightRecorderOptions=stackdepth=192"` for the run. A
-    recording keeps 64 frames per stack by default, and the probe's stacks are deeper.
-  - Print with `jfr print --stack-depth 192 --events jdk.ExecutionSample`. `jfr print` cuts
-    every stack to five frames by default.
-  - The scripts `dev/jfr-*.py` aggregate the printed text. They keep the `main` thread and
-    the `jefi-probe-*` threads.
-- The machine's default JDK is 25; the wrapper is fine with it. Only a Gander source build
-  needs a JDK 21 in `JAVA_HOME`.
-
-## Source sets
-
-### `src/main`
-
-Plugin code is under `us/drullk/jefi/jei/` in `probe`, `sandbox` and `scene`.
-
-- `InteractionProber`: the coordinator. Read `probeAll` first.
-- `RegistryProber`: the registry tier.
-- `RuleProber`: the base of `SpreadProber` and `NeighborProber`. `RuleProber.Sweep` holds the
-  fixed scene and the memo of one source form at one target.
-- `Candidates`: the candidate lists and `sourceStates(type)`.
-- `RunMemo`: what earlier runs read at a target.
-- `TypePredicate`: the fluid type that NeoForge's own predicate captures.
-- `RecipeIds`: the orderings and the id format.
-- `SandboxLevel.ORIGIN`: where every tier puts the source.
-- `META-INF/accesstransformer.cfg`: the only AT. It opens `FluidInteractionRegistry.INTERACTIONS`.
-- `assets/justenoughfluidinteractions/lang/en_us.json`: all translations.
-- `us.drullk.jefi.Config`: the client config, file `config/justenoughfluidinteractions-client.toml`.
-  - `hideUnprocessable`, `ignoredMods`: applied in `FluidInteractionsJeiPlugin.filter` after
-    the probe and before the merge.
-  - `mergeAcrossMods`: recipes that make only these blocks merge across mods (`RecipeMerger`).
-    The defaults are in `Config`.
-  - `mergeWithinMods`: recipes of these mods merge into rows that cycle together
-    (`LockstepMerger`). The defaults are in `Config`.
-  - `ignoredFluids`, default `fun_fluids:flood`: the probe skips each listed fluid and every
-    fluid that `isSame` with it, as a source and as a candidate. An existing file keeps its value.
-  - `probeThreads`, `probeStallSeconds`: size and guard the pool.
-  - `forceProbe`: adds fluids to the spread and neighbor tiers.
-
-### `src/dev`
-
-Development-only classes bound to the mod for runs, never packaged.
-
-- `JeiAutoTest`, `EmiAutoTest`, `GroundAutoTest`: gated by the system properties
-  `justenoughfluidinteractions.jeiautotest`, `.emiautotest`, `.groundtest`.
-- `AutoTestWorld`: the world creation, the onboarding dismissal, the screenshots, and the
-  `FIXTURES` flag, true under any of the three properties.
-- `TickSteps`: runs each test as a list of steps on the client tick.
-- `EmiAutoTestSteps`: every EMI reference, so no other run loads EMI classes.
-- `GroundCheck`: builds one recipe alternative in a real level and compares it. Each row of
-  a lockstep recipe is grounded as a recipe of its own.
-- `AutoTestConfig`: sets `hideUnprocessable` to false in memory when the client config loads
-  in a test run. The file on disk keeps its value. Outside a pack it also adds `gaiadimension`
-  to `mergeWithinMods`.
-- `PackRun`: clears `SharedConstants.IS_RUNNING_IN_IDE` for pack runs. NeoForge's gametest
-  scan loads every mod's gametest classes in a dev run.
-- `JeiAutoTestInteractions`: the dev-only interactions. One writes a potted poppy, a block
-  without an item. One makes obsidian from a lava source beside a snow block.
-- `JeiAutoTest.logInventory`: one `Smoke test inventory` line with the merge key per recipe
-  that writes a block of `mergeAcrossMods`.
-- `JeiAutoTestFluids`: two dev-only fluids. A `Fluid` claims its registry holder in its
-  constructor, so they are built inside `RegisterEvent`.
-  - `hardening_brine`: hardens lava-tagged fluids below it, source form only. Both forms
-    waterlog a dry waterloggable block below it with plain water.
-  - `dyed_water`: no spread code; water-tagged through
-    `src/dev/resources/data/minecraft/tags/fluid/water.json` with `required: false`; one
-    interaction with lava beside it; one that turns a dripstone block beside it into
-    waterlogged pointed dripstone.
-- `build.gradle` declares `sourceSets { dev }`. Naming `src/dev/java` or `src/dev/resources`
-  again feeds every dev resource to `processDevResources` twice.
-
-## Conventions and gotchas
-
-### Recipe viewers
-
-- The layout uses only JEI API that every viewer implements.
-  - EMI's JEMI bridge runs JEI plugins with builders of its own.
-  - TMRV ("Too Many Recipe Viewers") stubs JEI 19.27's API for EMI.
-- `FluidInteractionCategory` therefore:
-  - uses `addRecipePlusSign()` and `addRecipeArrow()`; the `...Widget()` forms postdate the
-    minimum JEI;
-  - centres them with the two-argument `setPosition`; the aligning overload is abstract in
-    newer JEI and absent in EMI;
-  - never uses `mezz.jei.common.Internal`;
-  - never sets a fluid renderer; TMRV throws for a slot with one that holds a block.
-- A builder whose `getRecipeSlots()` is null (EMI) cannot position widgets, route input or
-  ask for tooltips.
-  - Scenes then become `SceneDrawable`s, the failure text a `TextDrawable`.
-  - The scene tooltip lives in the category's `getTooltip`. JEI and EMI call it with
-    recipe-relative mouse coordinates. `SceneWidget`'s own tooltip is only the rotate hint.
-  - The category's `draw` keeps the slot view per recipe, so a static scene shows the same
-    alternatives as the tooltip.
-- Under EMI only `IRecipeCategory.handleInput` is called. It is deprecated since JEI 19.6.0;
-  JEI 19.53, EMI and TMRV still call it. So the category keeps a per-recipe `SceneRotation`.
-- Under TMRV scenes show the first alternative and rotate by click.
-- A lockstep recipe (`FluidInteractionRecipe.rows`) holds one entry per row in each linked slot.
-  - `createFocusLink` joins the linked slots. JEI throws when their counts differ.
-  - A source or neighbor list that every row shares is a free slot. It cycles on its own.
-  - A row with an entry that JEI hides stays out of every slot.
-  - JEMI ignores focus links and cycles equal slots in step. A static scene shows row
-    `seconds % size`, EMI's clock.
-  - EMI shows a tag in place of entries that fill it. Under EMI such a group stays apart.
-- `InertFormIndicator`: an `IRecipeWidget` per input slot whose fluid has an inert other form
-  in `FluidInteractionRecipe.inert`. It draws a yellow "!" at the slot's top-left each frame.
-  JEI draws a small triple bar there before a slot cycles. The slot's yellow line explains it.
-- A block without an item is an `ItemlessBlock` ingredient in every slot.
-  - It registers with an empty list and a codec. A focus on it still finds its recipe.
-  - Without it, a recipe has no output, no recipe id in the tooltip and no bookmark button.
-  - JEMI wraps it in a `JemiStack` and draws it with the JEI renderer.
-  - Its renderer draws each quad in the block's own render type, with the face shade of
-    `SandboxLevel.directionalShade`. A `"shade": false` quad, like fire, stays bright.
-- Slot roles decide what viewers count as a cost.
-  - INPUT: a result is written at the placement's offset and no alternative is a flowing
-    fluid. A flow costs nothing; its source block survives.
-  - CATALYST: everything else. JEI finds it under "uses"; EMI leaves it out of its cost tree.
-- JEI slots accept only still fluids. Map flowing states with `FluidInteractionRecipe.stillForm`.
-  - Neighbor placements carry the form the probe verified (`Placement.isFlowing`, "Flowing
-    <fluid>").
-  - A fluid verified in its flowing form is drawn flowing, with a still source beside it, because a
-    flow costs no source block (`SceneArrangement`).
-  - In a vertical pair, the block the interaction changes keeps that preference. The block that only
-    triggers it is drawn still whenever its still form was verified. A vertical flow is fed from the
-    south. When both blocks flow, the neighbor is fed from the west. Nothing flows upward.
-- JEI shows two recipes per page at the smoke test's window size and GUI scale 2.
-- JEI lists bookmarked recipes first. Not a bug, and no API hook to opt out.
-
-### Scenes
-
-- A lockstep recipe draws the row its slots show (`SceneArrangement.rowIndex`,
-  `SceneVariant.row`). Rows that show the same entries draw the first row.
-- Everything in `scene/` runs on the render thread. Vertex buffers are created and closed there.
-- `SceneBakery` pushes and pops the pose around each block tesselation. Vanilla's
-  `ModelBlockRenderer.tesselateBlock` translates by the block's random model offset without a
-  pop. The fluid drawn afterwards must start from the unoffset pose.
-- `GuiGraphics.enableScissor` in 1.21.1 takes absolute GUI coordinates. The widget's pose is
-  translated to the widget origin, so read `pose.m30()/m31()`.
-- Scenes are orthographic. They rotate by drag or by click.
-  - A click that never became a drag turns the yaw 90 degrees, left and right in opposite
-    directions.
-  - The display flow height is `SceneArrangement.DISPLAY_FLOW_LEVEL`; the probe keeps level 7.
-  - The default camera is `SceneRenderer.DEFAULT_YAW` and `DEFAULT_PITCH`.
-  - A custom rotate cursor plugs into `SceneCursor.handle()`.
-- The occlusion fix has no dev reproduction. If it regresses, check the second depth clear at
-  the end of `SceneRenderer.draw`.
-
-### Build
-
-- No mixins. Access transformers are acceptable.
-  - FML applies ATs on NeoForge's own classes at runtime. They are not visible at compile time
-    under ModDevGradle. Use a reflective lookup (`RegisteredInteractions`).
-  - An AT on a vanilla method that `BaseFlowingFluid` overrides fails the compile of every
-    `BaseFlowingFluid` subclass here. `SpreadProber` opens `beforeDestroyingBlock` with a
-    `MethodHandle` for that reason.
-- Never call `FlowingFluid.getFlowing(level, falling)` on modded fluids. Some register flowing
-  states without `LEVEL` or `FALLING`, and `setValue` throws. Build the state with
-  `defaultFluidState().trySetValue(...)`, as `Candidates` and `SceneArrangement` do.
-- A fresh `run/` directory has no `options.txt`, so the client opens the accessibility
-  onboarding screen. `JeiAutoTest` dismisses it. A smoke test that sits idle with no `Smoke
-  test` line is that dismissal.
-- The test deletes its save first. A loaded world stops on the experimental-world backup prompt.
-
-### The sandbox
-
-- `SandboxLevel` reports `isClientSide == false`, so server-guarded interactions run. Anything
-  from Gander that assumes a client level is overridden there; model data already is.
-- Two modes.
-  - Quiet: a write only lands in storage and is recorded. For a tier that calls one hook by hand.
-  - Live (`setLive`): `setBlock` mirrors a server level. An identical state is a no-op. Then
-    the old state's `onRemove`, the new state's `onPlace`, neighbor notification in vanilla
-    order through the sandbox's own `CollectingNeighborUpdater` (Gander's has a chain limit of
-    zero), then shape updates. Scheduled fluid ticks go to a queue on a virtual clock.
-- What the sandbox does not do.
-  - Block scheduled ticks need a `ServerLevel`; they are counted only.
-  - Its own neighbor updates do not fire `NeighborNotifyEvent`. A block hook can fire it.
-  - No block entities. No random ticks.
-  - An entity query answers with no entities. A spawn is denied and counted per entity type.
-  - The game rules turn block drops off. A dropped item is an entity the sandbox denies anyway.
-- The sandbox keeps a fluid state beside each block, so it hands back the state a tier
-  placed, not what the legacy block round-trips to.
-- Its random source restarts from one fixed seed for every arrangement. A hook that reads
-  `level.getRandom()` answers the same in every launch.
-- Reads are recorded only for the registry tier's search. `watch(pos)` tells a tier which
-  kinds of read hit one position. `reset` trims a table a settle grew.
-- While an arrangement settles, `floor(y)` puts the floor at the lowest placed position. A
-  fluid that pours off stops there. Nothing on the floor reaches the arrangement back.
-  - The system property `jefi.settleMargin` adds side walls at that distance, for experiments
-    only. Walls at distance 0 change results: the cells beside an arrangement send the
-    neighbor update that fires a liquid block's own `neighborChanged`.
-- The thread that uses a sandbox constructs it. C2ME binds a level's random source to the
-  constructing thread and rejects every other thread.
-
-### The probe
-
-- The pool. One fluid type is one task.
-  - Each tier runs its types on `probeThreads` threads: default every processor but one, at
-    most eight.
-  - Each thread owns a sandbox, a settler and its probers.
-  - Results assemble in type order, so the ids never depend on the thread count.
-  - A tier that throws on the pool runs again on the calling thread, and every later tier too.
-  - A thread without progress for `probeStallSeconds` counts as such a failure.
-    Progress is a candidate run or a settle.
-- Fluids without a block of their own never enter the probe (`FluidBlocks.hasBlock`).
-  - The block must hold that same fluid. A mixin can give a placeholder fluid another fluid's
-    block: Create: Wizardry does it for Iron's Spells' blood.
-  - Every candidate list holds only fluids with a block of their own.
-- The registry tier (`RegistryProber`), per source form:
-  - the fluid at `ORIGIN`, the predicate and the action with every fluid candidate in both
-    forms beside it, then with every block;
-  - a greedy multi-position search when nothing fired; the sandbox records what the predicate
-    reads;
-  - writes from the predicate count too;
-  - a write that changes only the fluid a block holds is not part of a hit;
-  - NeoForge's own type predicate passes only for its type (`TypePredicate`), so those fluids
-    go first.
-- `RunMemo`. Between two candidates at one target, the level differs only there.
-  - A hook that never reads the target answers for every candidate.
-  - A hook that reads only the fluid state answers for every candidate with that fluid state,
-    which is every block.
-  - When the shared answer changes nothing, the sweep stops.
-- The spread tier (`SpreadProber`).
-  - It ticks the still and flowing source states with one candidate below or beside. It keeps
-    writes that are not air, not a state of the source fluid, and not the placed block with
-    only another fluid in it.
-  - Only fluids whose own classes, below `FlowingFluid` and `BaseFlowingFluid`, declare
-    `tick`, `spread`, `spreadTo`, `canSpreadTo`, `getNewLiquid` or `beforeDestroyingBlock` are
-    ticked. `forceProbe` adds fluids.
-  - A fluid that declares none of `tick`, `spread`, `canSpreadTo` gets only the blocks
-    vanilla's gate admits.
-  - A fluid whose only own code is `beforeDestroyingBlock` gets that hook called directly per
-    candidate.
-  - A form whose classes declare no hook is inert without a run.
-  - Below is the canonical target. The registry's javadoc defers the down direction to
-    `spreadTo` (NeoForge issue 1880).
-  - The tier records the forms tried without effect (`FluidInteractionRecipe.inert`). Registry
-    recipes always have `InertForms.NONE`.
-- The neighbor tier (`NeighborProber`).
-  - A fluid is probed when its block declares `neighborChanged`, `onPlace` or `updateShape`
-    below `LiquidBlock`.
-  - It calls `handleNeighborChanged` and `onPlace` on the source's block state with one fluid
-    candidate below, beside or above.
-  - It never calls the candidate's hooks. A plain `LiquidBlock` runs the registry. Any other
-    block is probed as a source in its own turn.
-  - A write that changes only the fluid a placed block holds is no hit.
-- The settle step (`Settler`). All tiers only generate candidates.
-  - It builds every hit live: `Fixtures` first, then the content, then the source. A level
-    runs the placed block's hooks before it notifies neighbors.
-  - It runs the fluid ticks for `Settler.SETTLE_TICKS`.
-  - The results are the settled diff over the arrangement plus the rule's write positions:
-    never air, never what was placed, never a state of a poured fluid, never what was placed
-    with only another fluid in it.
-  - `Settler.onlyFluidDiffers`: the same block, and each changed property is `WATERLOGGED` or
-    alone changes the fluid state. A flooded or waterlogged block is no interaction.
-  - The arrangement stays with its tier only where the settled level still holds what the
-    rule wrote; a fluid counts as itself at any level. Otherwise it is dropped with a debug
-    `A level pre-empts ...` line.
-  - Extra changed positions stay as further results: cascades.
-  - Settling is deterministic. The first tier's attribution wins. Nothing is cached across
-    tiers.
-- `Fixtures`, shared with `GroundCheck`: bedrock under anything that falls, and a still source
-  feeding every flowing placement from the side away from the arrangement. Fixtures never
-  enter a recipe.
-- Owners (`InteractionOwners`): the lambda's declaring class, then the namespace of captured
-  registry objects. A spread rule is owned by its fluid, a neighbor rule by its block. A mod
-  using `InteractionInformation`'s convenience constructors with vanilla blocks reads as
-  `neoforge`. Attribution is approximate.
-- Failure recipes.
-  - An interaction whose every arrangement is pre-empted states the observation
-    (`Texts.preempted`): "This interaction would change Lava next to Water into Blackstone.
-    However in the world, the Lava changes into Obsidian." When the source stays: "... However
-    in the world, the Honey Fluid does not change."
-  - An interaction that settles without a result keeps "Unable to process".
-  - `hideUnprocessable` hides both.
-- Text about another mod's behavior states the observation only: no "bug", "incomplete",
-  "missing", "should", "likely". The inert-form lines are yellow. The `Fluid spread form
-  difference` line is the one a mod author greps for.
-
-### Recipe ids
-
-- Formats, all with `justenoughfluidinteractions:` in front:
-  - registry: `<type ns>/<type path>/<owner>/<n>/<variant>`;
-  - spread: `spread/<type ns>/<type path>/<owner>/<n>/<variant>`;
-  - neighbor: `neighbor/<type ns>/<type path>/<owner>/<n>/<variant>`;
-  - a first-pass merge of several owners: `<tier><type ns>/<type path>/merged/<n>/<variant>`;
-  - a second-pass merge of several owners: `<tier>merged/<result ns>/<result path>/<variant>`.
-- Ids stay unique and stable across launches. JEI uses them for bookmarks.
-- Types rank `minecraft`, `neoforge`, other namespaces alphabetically, then path
-  (`RecipeIds.LOCATION_ORDER`, never `ResourceLocation`'s path-first order).
-- Inside a type:
-  - registry interactions group by owner in that ranking and number `n`: successes first, then
-    the result block's key, then registration index;
-  - spread recipes number `n` by target (below, beside); neighbor recipes by below, beside,
-    above; both number `variant` by outcome;
-  - registration index alone is unstable, because NeoForge dispatches mod setup in parallel.
-- Display order is type, then owner rank across tiers, then registry, spread, neighbor. Ids
-  are assigned before that regrouping.
-- `RecipeMerger` keeps the first member's id. It keys on the owner and the neighbor offset too.
-  - A recipe whose every result block is in `mergeAcrossMods` keys on its neighbor kinds, fluid
-    or block, in place of its owner, in both passes.
-  - The first pass keys on the source type. The second pass unions the source fluids.
-  - A merge of several owners has no owner. Its numbers count only the merges in the pack.
-- `LockstepMerger` is the third pass. It merges recipes of one `mergeWithinMods` owner with one
-  shape: tier, offsets, source forms and neighbor kinds.
-  - The first two passes compare a fluid result by its still form. Members whose exact results
-    differ become rows.
-  - A group whose rows have no free slot splits first. Members that share one list of two or
-    more entries in one slot form one part; the other members form one more part. Each part
-    frees the slot of its list. The first part keeps the group's id; each other part takes the
-    id of its first member. A part of one member stays a plain recipe.
-  - A part of more than 100 rows splits by neighbor entries, then by source fluids. Each part
-    that fits merges. JEI cycles at most 100 entries of one slot on screen.
-  - Rows drop only exact repeats.
+- EMI's JEMI bridge and TMRV run the category with builders of their own.
+  - Use only API of the minimum JEI that every viewer implements: `addRecipePlusSign()`,
+    `addRecipeArrow()`, the two-argument `setPosition`.
+  - Never use `mezz.jei.common.Internal`. Never set a fluid renderer: TMRV throws.
+  - `getRecipeSlots()` is null under EMI. There only `handleInput` routes clicks.
+- JEI slots hold still fluids only (`FluidInteractionRecipe.stillForm`).
+- JEI cycles at most 100 entries of one slot on screen. Linked slots must hold equal counts.
+- Which form a scene draws, still or flowing, is the user's decision. Confirm a change recipe by
+  recipe first.
+- `SandboxLevel` reports `isClientSide == false`. The thread that uses a sandbox builds it:
+  C2ME binds a level's random source to the constructing thread.
+- Never call `FlowingFluid.getFlowing(level, falling)` on a modded fluid. Build the state with
+  `defaultFluidState().trySetValue(...)`.
+- An AT on a NeoForge class is not visible at compile time: use reflection
+  (`RegisteredInteractions`).
+- An AT on a vanilla method that `BaseFlowingFluid` overrides breaks the compile of every
+  subclass. `SpreadProber` uses a `MethodHandle` for that reason.
+- `scene/` runs on the render thread. `SceneBakery` pops the pose after each block.
+  `enableScissor` takes absolute GUI coordinates.
+- Two test mods crash a dev run now and then: Create Aeronautics' `LevititeCrystallizerManager`
+  and Create's Registrate. Run again.
 
 ## Verifying changes
 
-Run the smoke test and read the screenshots. `latest.log` has the info lines; the debug lines
-are in `run/logs/debug.log`. An `ERROR` from a smoke-test check is a regression.
-
-### Probe lines at info
-
-- `Probed N fluid interaction(s)`, `Probed fluid spread of N fluid type(s)`,
-  `Probed fluid neighbors of N fluid type(s)`.
-- `Merged N fluid interaction recipe(s) into M`.
-- One `RegisterSpawnPlacementsEvent` ERROR from NeoForge about a test mod's entities: noise.
-
-### Probe lines at debug
-
-- `Skipped N fluid(s) whose block holds a different fluid`. In dev: 0.
-- `Probing on N thread(s)`.
-- One `Probed fluid spread of <type>` and one `Probed fluid neighbors of <type>` per probed
-  type, from the `jefi-probe-*` threads.
-- The two `Skipped the ... of N of M fluid type(s)` lines.
-- `Fluid spread candidates: ...`.
-- The `Skipped N candidate run(s)` lines of all three tiers.
-- `Swept the predicate's own fluid type first ...`.
-- One `Probing the fluid spread of <fluid> through beforeDestroyingBlock alone` per source form
-  on that path. In dev: both forms of water, of BOP's blood and liquid null, and still tar.
-- Three `After <tier>: settled ...` lines, then `Settled N arrangement(s)`.
-- `Denied N entity spawn(s)`.
-- `Skipped N fluid interaction(s) on M fluid type(s) whose fluids have no block`. In dev: BOP
-  on milk, Create's potion and tea.
-- `Skipped N fluid interaction(s) on M fluid type(s) whose fluids the config ignores`.
-- `Dropped N arrangement(s) of the fluid interactions that change only the fluid a block holds`.
-- One `A level pre-empts N of the M arrangement(s)` per fully pre-empted interaction. In dev:
-  the dev lava fixture, BOP's honey and royal jelly in both forms.
-- One `A level pre-empts ...` per dropped alternative and form. In dev: both forms of
-  `dyed_water` and of sugar water leave the stone recipe, both forms of sugar water leave the
-  tar recipe, each once per lava form.
-- Two `Fluid spread form difference` lines: the dev fluid, DivineRPG's tar.
-- `No probe of fluid interaction ... succeeded` for exactly six: the dev `minecraft:water#0`
-  fallback, the dev pre-empted `minecraft:lava` fixture, and BOP's interactions on
-  `the_bumblezone:honey` and `the_bumblezone:royal_jelly` in both forms.
-- No `Failed to bake`.
-
-### Smoke-test lines
-
-One each unless stated.
-
-- `Smoke test recipe ...` per recipe, with `0 offender(s)`.
-- `merged recipe`: both merge passes collapsed the dev-only mergeable interactions.
-- `merged across mods`: lava beside fluids of several mods is one obsidian recipe,
-  `minecraft/lava/merged/0/0`, with no owner. The snow block neighbor stays apart.
-- `flowing neighbor`: the cobblestone recipe carries a flowing water neighbor.
-- `spread recipe`: lava over water gives stone, with both water forms.
-- `order`: the stone recipe precedes every third-party lava recipe.
-- `form difference`: the dev fluid's still form, the flowing form inert and named in the tooltip.
-- `pre-empted`: `dyed_water` absent from the stone recipe, its own two recipes present.
-- `indicator`: the "!" on the dev fluid's source slot.
-- `neighbor recipe` per sugar water recipe, found by result, source form and offset, never by
-  variant number or alternative count.
-- `vertical flow`: the cobblestone neighbor recipe draws flowing sugar water fed from the south,
-  still lava above it, and its flowing lava alternative fed from the west. The stone recipe draws a
-  lava source over flowing water fed from the south.
-- Two `neighbor pre-empted`: sugar water absent from the stone and tar spread recipes.
-- Two `neighbor registry pre-empted`: lava absent beside, present above, differing by lava's
-  two forms.
-- `own rule`: no recipe carries another rule's result.
-- `cascade`: honey with still water above carries the crystal and the sugar water it writes.
-- `pre-empted interaction` and `pre-empted third-party interaction`, quoting the failure texts.
-- `offset recipe`: the dripstone block beside the source becomes waterlogged pointed dripstone.
-- `waterlog`: no result differs from its placed block only in its fluid. `hardening_brine`
-  has one spread recipe.
-- `blockless`: the potted poppy slot holds an `ItemlessBlock`, and a focus on it finds the recipe.
-- `merged within a mod`: the first gaiadimension lockstep recipe, 0 rows out of step while the
-  slots cycle and under a focus on one result.
-- `direction`: the Gaia fixture gives one recipe with a free source slot and one with a free
-  neighbor slot.
-- `lockstep pairs`: no pair of entries repeats with one result. In a pack, Mingle's mirror rows
-  (copper beside zinc, zinc beside copper) log an ERROR that means nothing.
-- `recipe ids <sha-256>`: must not change between runs of one checkout.
-
-### The other two runs
-
-- EMI: `EMI test found N recipe(s)` with the JEI run's count, seven `EMI test screenshot`
-  lines, one `EMI test clicked the left scene` line, one `EMI test blockless` line, one
-  `EMI test merged within a mod` line, no `Exception adding JEMI extras`.
-- Grounding: `Grounded N recipe alternative(s) of M recipe(s): 0 mismatch(es)`, with `0 of
-  them holding a fluid no level can hold`, and no `Grounding mismatch` line.
-
-### Screenshots
-
-- `jei_fluid_interactions_spread.png`: a lava source over flowing water, then over stone.
-- `_form.png`. `_neighbor.png`: flowing sugar water fed from the south, a lava source above it.
-- `_cascade.png`: two output slots.
-- `_preempted.png`: the source slot over the wrapped observation text.
-- `_offset.png`: a grid-aligned water cube around the offset dripstone.
-- `_blockless.png`: water and a flower pot, a potted poppy in the output slot.
-- `_merged_within.png`, `_merged_within_later.png`: one lockstep recipe at two rows. The scene
-  matches the slots.
-- Crop and enlarge with `sips` or PIL when a detail matters.
+- Read every PNG in `run/screenshots/`. Crop with `sips` or PIL when a detail matters.
+- Each smoke-test check logs one `Smoke test ...` line. An ERROR from a check is a regression.
+- Noise: DivineRPG's recipe parse errors and one `RegisterSpawnPlacementsEvent` line.
+- `Smoke test recipe ids <sha-256>` must not change between runs of one checkout.
+- EMI: its recipe count equals JEI's, and no `Exception adding JEMI extras`.
+- Grounding: `Grounded N recipe alternative(s) of M recipe(s): 0 mismatch(es)`.
+- The full list of expected lines and screenshots is in `dev/HANDOFF.md`, section 6b.
