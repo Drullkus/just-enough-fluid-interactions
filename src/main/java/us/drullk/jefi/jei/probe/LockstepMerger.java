@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -25,6 +26,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.fml.ModList;
@@ -36,6 +39,9 @@ import net.neoforged.fml.ModList;
  * <p>A group without a free slot splits by a list its members share.
  *
  * <p>A group of more than {@link #MAX_ROWS} rows splits by neighbor entries, then by source fluids.
+ *
+ * <p>A row that shows an earlier row with the source and the neighbor swapped is a mirror. The recipe keeps the
+ * mirror apart from its rows.
  *
  * <p>EMI shows a whole tag in place of its entries. So under EMI, a group that fills a tag stays apart.
  */
@@ -76,14 +82,14 @@ final class LockstepMerger {
                     merged.add(group.getFirst());
                     continue;
                 }
-                List<FluidInteractionRecipe> rows = rows(group);
-                if (rows.size() > MAX_ROWS) {
+                Rows rows = rows(group);
+                if (rows.shown().size() > MAX_ROWS) {
                     LOGGER.debug("Kept {} recipe(s) of {} from {} apart: {} rows", group.size(), group.getFirst().owner(),
-                            group.getFirst().id(), rows.size());
+                            group.getFirst().id(), rows.shown().size());
                     merged.addAll(group);
                     continue;
                 }
-                TagKey<?> tag = emi ? filledTag(group.getFirst(), rows) : null;
+                TagKey<?> tag = emi ? filledTag(group.getFirst(), rows.shown()) : null;
                 if (tag != null) {
                     LOGGER.debug("Kept {} recipe(s) of {} from {} apart: EMI shows the tag {} in place of their entries",
                             group.size(), group.getFirst().owner(), group.getFirst().id(), tag.location());
@@ -110,7 +116,7 @@ final class LockstepMerger {
         if (group.size() == 1) {
             return List.of(group);
         }
-        List<FluidInteractionRecipe> rows = rows(group);
+        List<FluidInteractionRecipe> rows = rows(group).shown();
         if (FluidInteractionRecipe.sharesSources(rows) || FluidInteractionRecipe.sharesNeighbors(rows)) {
             return List.of(group);
         }
@@ -155,12 +161,12 @@ final class LockstepMerger {
      * fluids, in member order.
      */
     private static List<List<FluidInteractionRecipe>> bySize(List<FluidInteractionRecipe> group) {
-        if (group.size() == 1 || rows(group).size() <= MAX_ROWS) {
+        if (group.size() == 1 || rows(group).shown().size() <= MAX_ROWS) {
             return List.of(group);
         }
         List<List<FluidInteractionRecipe>> parts = new ArrayList<>();
         for (List<FluidInteractionRecipe> byNeighbors : split(group, FluidInteractionRecipe::neighborEntries)) {
-            if (byNeighbors.size() == 1 || rows(byNeighbors).size() <= MAX_ROWS) {
+            if (byNeighbors.size() == 1 || rows(byNeighbors).shown().size() <= MAX_ROWS) {
                 parts.add(byNeighbors);
             } else {
                 parts.addAll(split(byNeighbors, FluidInteractionRecipe::sourceFluids));
@@ -177,10 +183,19 @@ final class LockstepMerger {
     }
 
     /**
-     * The members' rows in member order, without exact repeats. A source or neighbor list that pairs with every
-     * other entry of the rows becomes one free slot.
+     * The shown rows and the mirrors of a group.
+     *
+     * @param shown   the rows the slots show.
+     * @param mirrors the members' own mirrors, then each row that an earlier shown row mirrors.
      */
-    static List<FluidInteractionRecipe> rows(List<FluidInteractionRecipe> group) {
+    record Rows(List<FluidInteractionRecipe> shown, List<FluidInteractionRecipe> mirrors) {
+    }
+
+    /**
+     * The members' rows in member order, without exact repeats and without mirrors. A source or neighbor list
+     * that pairs with every other entry of the rows becomes one free slot.
+     */
+    static Rows rows(List<FluidInteractionRecipe> group) {
         Map<List<Object>, FluidInteractionRecipe> rows = new LinkedHashMap<>();
         for (FluidInteractionRecipe member : group.stream().flatMap(recipe -> recipe.rowsOrSelf().stream()).toList()) {
             Map<Object, List<Placement>> neighbors = new LinkedHashMap<>();
@@ -196,7 +211,54 @@ final class LockstepMerger {
                 }
             }
         }
-        return free(free(List.copyOf(rows.values()), true), false);
+        List<FluidInteractionRecipe> shown = new ArrayList<>();
+        List<FluidInteractionRecipe> mirrors = new ArrayList<>();
+        group.forEach(member -> mirrors.addAll(member.mirrors()));
+        Set<List<Object>> kept = new HashSet<>();
+        for (FluidInteractionRecipe row : rows.values()) {
+            List<Object> mirrored = mirrored(row);
+            if (mirrored != null && kept.contains(mirrored)) {
+                mirrors.add(row);
+            } else {
+                kept.add(content(row));
+                shown.add(row);
+            }
+        }
+        return new Rows(free(free(List.copyOf(shown), true), false), List.copyOf(mirrors));
+    }
+
+    /** A row's offset, forms and results, with the order of the forms left out. */
+    private static List<Object> content(FluidInteractionRecipe row) {
+        return List.of(row.neighborOffset(), Set.copyOf(row.sources()), Set.copyOf(row.neighbors()), row.conditions(), row.results());
+    }
+
+    /**
+     * The {@link #content} of a row turned half a circle about the point between the source and the neighbor.
+     * Null for a vertical neighbor and for a neighbor that is not only a fluid.
+     */
+    @SuppressWarnings("deprecation")
+    private static @Nullable List<Object> mirrored(FluidInteractionRecipe row) {
+        BlockPos offset = row.neighborOffset();
+        if (offset.getY() != 0 || row.neighbors().isEmpty() || !row.neighbors().stream().allMatch(LockstepMerger::isOnlyFluid)) {
+            return null;
+        }
+        Set<FluidState> sources = row.neighbors().stream().map(Placement::effectiveFluid).collect(Collectors.toSet());
+        Set<Placement> neighbors = row.sources().stream().map(Placement::ofFluid).collect(Collectors.toSet());
+        Map<BlockPos, Placement> conditions = new HashMap<>();
+        row.conditions().forEach((pos, placement) -> conditions.put(turned(offset, pos),
+                new Placement(placement.block().rotate(Rotation.CLOCKWISE_180), placement.fluid())));
+        Map<BlockPos, BlockState> results = new HashMap<>();
+        row.results().forEach((pos, state) -> results.put(turned(offset, pos), state.rotate(Rotation.CLOCKWISE_180)));
+        return List.of(offset, sources, neighbors, conditions, results);
+    }
+
+    private static boolean isOnlyFluid(Placement placement) {
+        return placement.fluid() != null && placement.equals(Placement.ofFluid(placement.fluid()));
+    }
+
+    /** The position half a circle around the point between the source and the neighbor. */
+    private static BlockPos turned(BlockPos offset, BlockPos pos) {
+        return new BlockPos(offset.getX() - pos.getX(), pos.getY(), offset.getZ() - pos.getZ());
     }
 
     /** Joins rows that differ only in the source, or only in the neighbor, when every such group holds every value. */
@@ -242,10 +304,23 @@ final class LockstepMerger {
         return Arrays.asList(source ? row.sources() : null, neighbor ? row.neighbors() : null, row.conditions(), row.results());
     }
 
-    /** A merge of several members into rows. The union of their sources and neighbors is the recipe's. */
-    static FluidInteractionRecipe build(List<FluidInteractionRecipe> group, List<FluidInteractionRecipe> rows, ResourceLocation id,
-                                        @Nullable String owner) {
+    /**
+     * A merge of several members into rows. The union of the sources and neighbors of the shown rows is the
+     * recipe's. A merge that shows only one row is that row.
+     */
+    static FluidInteractionRecipe build(List<FluidInteractionRecipe> group, Rows rows, ResourceLocation id, @Nullable String owner) {
         FluidInteractionRecipe first = group.getFirst();
+        int carried = group.stream().mapToInt(member -> member.mirrors().size()).sum();
+        if (rows.mirrors().size() > carried) {
+            LOGGER.debug("Dropped {} row(s) of {} from {} that show another row with the source and the neighbor swapped: {}",
+                    rows.mirrors().size() - carried, owner, id, rows.mirrors().subList(carried, rows.mirrors().size()).stream()
+                            .map(LockstepMerger::describe).toList());
+        }
+        if (rows.shown().size() == 1) {
+            FluidInteractionRecipe row = rows.shown().getFirst();
+            return new FluidInteractionRecipe(first.sourceType(), id, row.sources(), row.neighbors(), row.neighborOffset(),
+                    row.conditions(), row.results(), null, owner, row.inert(), List.of(), rows.mirrors());
+        }
         Set<FluidState> sources = new LinkedHashSet<>();
         Set<Placement> neighbors = new LinkedHashSet<>();
         Set<FluidState> inertSources = new LinkedHashSet<>();
@@ -256,11 +331,19 @@ final class LockstepMerger {
             inertSources.addAll(member.inert().sources());
             inertNeighbors.addAll(member.inert().neighbors());
         }
+        sources.retainAll(rows.shown().stream().flatMap(row -> row.sources().stream()).collect(Collectors.toSet()));
+        neighbors.retainAll(rows.shown().stream().flatMap(row -> row.neighbors().stream()).collect(Collectors.toSet()));
         inertSources.removeAll(sources);
         inertNeighbors.removeAll(neighbors);
         return new FluidInteractionRecipe(first.sourceType(), id, List.copyOf(sources), List.copyOf(neighbors),
                 first.neighborOffset(), first.conditions(), first.results(), null, owner,
-                new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)), rows);
+                new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)), rows.shown(), rows.mirrors());
+    }
+
+    private static String describe(FluidInteractionRecipe row) {
+        return row.sourceFluids().stream().map(BuiltInRegistries.FLUID::getKey).toList() + " beside "
+                + row.neighbors().stream().map(neighbor -> BuiltInRegistries.FLUID.getKey(FluidInteractionRecipe.stillForm(neighbor.effectiveFluid())))
+                        .distinct().toList();
     }
 
     /** A tag of at least two values that one slot's entries fill, or null. */

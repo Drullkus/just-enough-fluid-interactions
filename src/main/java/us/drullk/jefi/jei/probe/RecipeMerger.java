@@ -343,15 +343,16 @@ public final class RecipeMerger {
             ResourceLocation id = mergedId != null ? mergedId : first.id();
             String owner = mergedId != null ? null : first.owner();
             if (all.stream().anyMatch(FluidInteractionRecipe::isLockstep) || all.stream().map(FluidInteractionRecipe::results).distinct().count() > 1) {
-                List<FluidInteractionRecipe> rows = LockstepMerger.rows(all);
-                return rows.size() > LockstepMerger.MAX_ROWS ? all : List.of(LockstepMerger.build(all, rows, id, owner));
+                LockstepMerger.Rows rows = LockstepMerger.rows(all);
+                return rows.shown().size() > LockstepMerger.MAX_ROWS ? all : List.of(LockstepMerger.build(all, rows, id, owner));
             }
             inertSources.removeAll(sources);
             inertNeighbors.removeAll(neighbors);
             return List.of(new FluidInteractionRecipe(first.sourceType(), id,
                     List.copyOf(sources), List.copyOf(neighbors), first.neighborOffset(),
                     first.conditions(), first.results(), null, owner,
-                    new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors))));
+                    new InertForms(List.copyOf(inertSources), List.copyOf(inertNeighbors)), List.of(),
+                    all.stream().flatMap(member -> member.mirrors().stream()).toList()));
         }
     }
 }

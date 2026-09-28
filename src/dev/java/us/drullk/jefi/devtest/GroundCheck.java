@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -52,14 +53,17 @@ final class GroundCheck {
     record Mismatch(BlockPos offset, BlockState expected, BlockState found) {
     }
 
-    /** Every alternative of every recipe a probe claims to have exercised, in recipe order. A row is a recipe here. */
+    /**
+     * Every alternative of every recipe a probe claims to have exercised, in recipe order. A row is a recipe
+     * here, and so is a mirror.
+     */
     static List<Alternative> alternatives(List<FluidInteractionRecipe> recipes) {
         List<Alternative> alternatives = new ArrayList<>();
         for (FluidInteractionRecipe listed : recipes) {
             if (listed.isFailure() || listed.results().isEmpty()) {
                 continue;
             }
-            for (FluidInteractionRecipe recipe : listed.rowsOrSelf()) {
+            for (FluidInteractionRecipe recipe : Stream.concat(listed.rowsOrSelf().stream(), listed.mirrors().stream()).toList()) {
                 for (FluidState source : recipe.sources()) {
                     if (recipe.neighbors().isEmpty()) {
                         alternatives.add(new Alternative(recipe, source, null, listed));

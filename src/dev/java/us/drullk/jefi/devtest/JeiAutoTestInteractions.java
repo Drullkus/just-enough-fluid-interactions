@@ -1,5 +1,7 @@
 package us.drullk.jefi.devtest;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,12 +12,15 @@ import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForgeMod;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
+import net.neoforged.neoforge.fluids.FluidInteractionRegistry.FluidInteraction;
+import net.neoforged.neoforge.fluids.FluidInteractionRegistry.HasFluidInteraction;
 import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInformation;
 import net.neoforged.neoforge.fluids.FluidType;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
@@ -30,7 +35,8 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
  * tick, so settling leaves that fluid out of vanilla's stone recipe. One interaction is registered on lava for
  * a water neighbor. A level answers it with the interaction registered before it. One interaction writes a
  * block without an item. One interaction writes obsidian from a lava source beside a block. Eight
- * interactions pair two Gaia fluids with two other fluids in both directions.
+ * interactions pair two Gaia fluids with two other fluids in both directions. Three interactions turn a Gaia
+ * fluid and the Gaia fluid beside it into one block: one pair in both directions, one pair in one direction.
  */
 @EventBusSubscriber(modid = JustEnoughFluidInteractions.MODID)
 public final class JeiAutoTestInteractions {
@@ -74,6 +80,19 @@ public final class JeiAutoTestInteractions {
         DIRECTION_PARTNERS.put(ResourceLocation.withDefaultNamespace("water"), Blocks.PRISMARINE);
         DIRECTION_PARTNERS.put(ResourceLocation.fromNamespaceAndPath("gaiadimension", "liquid_aura"), Blocks.AMETHYST_BLOCK);
     }
+
+    /** The mod credited with the interactions that turn both fluids into one block. */
+    static final String MIRROR_OWNER = AutoTestConfig.LOCKSTEP_MOD;
+    /** Fluid types that each turn themselves and the other type into {@link #MIRROR_RESULT}. */
+    static final List<ResourceLocation> MIRROR_PAIR = List.of(
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "mineral_water"),
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "sweet_muck"));
+    static final Block MIRROR_RESULT = Blocks.TUFF_BRICKS;
+    /** The first type turns itself and the second type into {@link #ONE_WAY_RESULT}. The second type does not. */
+    static final List<ResourceLocation> ONE_WAY_PAIR = List.of(
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "liquid_bismuth"),
+            ResourceLocation.fromNamespaceAndPath("gaiadimension", "superhot_magma"));
+    static final Block ONE_WAY_RESULT = Blocks.MUD_BRICKS;
 
     private JeiAutoTestInteractions() {
     }
@@ -144,6 +163,9 @@ public final class JeiAutoTestInteractions {
                     }
                 }
             });
+            addBoth(MIRROR_PAIR.getFirst(), MIRROR_PAIR.getLast(), MIRROR_RESULT);
+            addBoth(MIRROR_PAIR.getLast(), MIRROR_PAIR.getFirst(), MIRROR_RESULT);
+            addBoth(ONE_WAY_PAIR.getFirst(), ONE_WAY_PAIR.getLast(), ONE_WAY_RESULT);
             // This interaction is for lava with water beside it. The interaction registered on lava before this
             // one answers first, so every arrangement settles as that one's result. This one's failure recipe
             // states what stands there instead.
@@ -151,5 +173,40 @@ public final class JeiAutoTestInteractions {
                     (level, pos, relativePos, state) -> level.getFluidState(relativePos).getFluidType() == NeoForgeMod.WATER_TYPE.value(),
                     PREEMPTED_RESULT.defaultBlockState()));
         });
+    }
+
+    /** A fluid of the source type beside a fluid of the partner type: both become the result. */
+    private static void addBoth(ResourceLocation source, ResourceLocation partner, Block result) {
+        FluidType sourceType = NeoForgeRegistries.FLUID_TYPES.get(source);
+        FluidType partnerType = NeoForgeRegistries.FLUID_TYPES.get(partner);
+        if (sourceType == null || partnerType == null) {
+            return;
+        }
+        BlockState state = result.defaultBlockState();
+        FluidInteractionRegistry.addInteraction(sourceType, new InteractionInformation(
+                unowned(HasFluidInteraction.class,
+                        (level, pos, relativePos, fluidState) -> level.getFluidState(relativePos).getFluidType() == partnerType),
+                unowned(FluidInteraction.class, (level, pos, relativePos, fluidState) -> {
+                    level.setBlock(pos, state, Block.UPDATE_ALL);
+                    level.setBlock(relativePos, state, Block.UPDATE_ALL);
+                })));
+    }
+
+    /** A proxy class belongs to no mod, so the owner is the mod of the source type. */
+    private static <T> T unowned(Class<T> type, T target) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, (proxy, method, args) -> {
+            if (method.getDeclaringClass() != Object.class) {
+                try {
+                    return method.invoke(target, args);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            }
+            return switch (method.getName()) {
+                case "equals" -> proxy == args[0];
+                case "hashCode" -> System.identityHashCode(proxy);
+                default -> type.getSimpleName() + " " + target;
+            };
+        }));
     }
 }

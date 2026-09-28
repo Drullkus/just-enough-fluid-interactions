@@ -37,6 +37,8 @@ import net.neoforged.neoforge.fluids.FluidType;
  * @param inert          forms the same spread probe tries at this arrangement with no result. It is empty for
  *                       everything the registry probe finds.
  * @param rows           the rows of a recipe whose slots cycle together. Empty for every other recipe.
+ * @param mirrors        the rows that another row of this recipe shows with the source and the neighbor
+ *                       swapped. The slots do not show them. Grounding builds them.
  */
 public record FluidInteractionRecipe(
         FluidType sourceType,
@@ -49,7 +51,8 @@ public record FluidInteractionRecipe(
         @Nullable Component failure,
         @Nullable String owner,
         InertForms inert,
-        List<FluidInteractionRecipe> rows) {
+        List<FluidInteractionRecipe> rows,
+        List<FluidInteractionRecipe> mirrors) {
 
     /** The neighbor position the probe hands to registered interactions, as an offset from the source. */
     public static final BlockPos NEIGHBOR_OFFSET = new BlockPos(0, 0, -1);
@@ -57,7 +60,7 @@ public record FluidInteractionRecipe(
     public FluidInteractionRecipe(FluidType sourceType, ResourceLocation id, List<FluidState> sources, List<Placement> neighbors,
                                   BlockPos neighborOffset, Map<BlockPos, Placement> conditions, Map<BlockPos, BlockState> results,
                                   @Nullable Component failure, @Nullable String owner, InertForms inert) {
-        this(sourceType, id, sources, neighbors, neighborOffset, conditions, results, failure, owner, inert, List.of());
+        this(sourceType, id, sources, neighbors, neighborOffset, conditions, results, failure, owner, inert, List.of(), List.of());
     }
 
     public static FluidInteractionRecipe failed(FluidType type, ResourceLocation id, Component reason, @Nullable String owner) {

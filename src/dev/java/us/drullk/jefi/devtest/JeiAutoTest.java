@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -55,6 +57,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -215,6 +218,7 @@ public final class JeiAutoTest {
         checkMergedAcrossMods(recipes);
         checkMergedWithinMod(recipes);
         checkLockstepPairs(recipes);
+        checkMirrorRows(recipes);
         checkDirection(recipes);
         checkFlowingNeighbor(recipes);
         checkSpreadRecipe(recipes);
@@ -471,25 +475,25 @@ public final class JeiAutoTest {
         }
     }
 
-    /** Rows that show different entries never repeat a pair with one result. */
+    /** Rows that show different entries never repeat a pair with one result. A pair and its mirror are one pair. */
     private static void checkLockstepPairs(List<FluidInteractionRecipe> found) {
         List<FluidInteractionRecipe> lockstep = found.stream().filter(FluidInteractionRecipe::isLockstep).toList();
         int repeated = 0;
+        int mirrors = 0;
         for (FluidInteractionRecipe recipe : lockstep) {
-            Set<List<String>> seen = new LinkedHashSet<>();
-            Set<List<String>> repeats = new LinkedHashSet<>();
+            mirrors += recipe.mirrors().size();
+            Set<String> seen = new LinkedHashSet<>();
+            Set<String> repeats = new LinkedHashSet<>();
             Map<List<Object>, FluidInteractionRecipe> shown = new LinkedHashMap<>();
             recipe.rows().forEach(row -> shown.putIfAbsent(List.of(row.sourceFluids(), row.neighborEntries(), describe(row.results())), row));
             for (FluidInteractionRecipe row : shown.values()) {
-                Set<List<String>> pairs = new LinkedHashSet<>();
+                Set<String> pairs = new LinkedHashSet<>();
                 for (Fluid source : row.sourceFluids()) {
                     for (Object neighbor : row.neighborEntries()) {
-                        List<String> pair = Stream.of(entryKey(source), entryKey(neighbor)).sorted().collect(Collectors.toCollection(ArrayList::new));
-                        pair.add(describe(row.results()).toString());
-                        pairs.add(pair);
+                        pairs.add(pairKey(row, source, neighbor));
                     }
                 }
-                for (List<String> pair : pairs) {
+                for (String pair : pairs) {
                     if (!seen.add(pair)) {
                         repeats.add(pair);
                     }
@@ -500,7 +504,66 @@ public final class JeiAutoTest {
                 LOGGER.error("Smoke test lockstep pairs: {} (from {}) repeats {}", recipe.id(), recipe.owner(), repeats);
             }
         }
-        LOGGER.info("Smoke test lockstep pairs: {} lockstep recipe(s), {} repeated pair(s)", lockstep.size(), repeated);
+        LOGGER.info("Smoke test lockstep pairs: {} lockstep recipe(s), {} repeated pair(s), {} mirror row(s)", lockstep.size(), repeated, mirrors);
+    }
+
+    /** One pair of a row as text. A horizontal pair reads the same from either of its two positions. */
+    private static String pairKey(FluidInteractionRecipe row, Fluid source, Object neighbor) {
+        String plain = pairText(row, source, neighbor, false);
+        if (row.neighborOffset().getY() != 0) {
+            return plain;
+        }
+        String turned = pairText(row, source, neighbor, true);
+        return plain.compareTo(turned) <= 0 ? plain : turned;
+    }
+
+    /** What each position holds and becomes, sorted. Turned means half a circle about the middle of the pair. */
+    @SuppressWarnings("deprecation")
+    private static String pairText(FluidInteractionRecipe row, Fluid source, Object neighbor, boolean turned) {
+        BlockPos offset = row.neighborOffset();
+        Map<BlockPos, String> placed = new HashMap<>();
+        placed.put(BlockPos.ZERO, entryKey(source));
+        placed.put(offset, entryKey(neighbor));
+        row.conditions().forEach((pos, placement) -> placed.put(pos, entryKey(placement.slotEntry())));
+        Set<BlockPos> positions = new HashSet<>(placed.keySet());
+        positions.addAll(row.results().keySet());
+        List<String> parts = new ArrayList<>();
+        for (BlockPos pos : positions) {
+            BlockState result = row.results().get(pos);
+            BlockPos at = turned ? new BlockPos(offset.getX() - pos.getX(), pos.getY(), offset.getZ() - pos.getZ()) : pos;
+            String becomes = result == null ? "kept" : String.valueOf(turned ? result.rotate(Rotation.CLOCKWISE_180) : result);
+            parts.add(at.toShortString() + "=" + placed.getOrDefault(pos, "air") + "->" + becomes);
+        }
+        return parts.stream().sorted().toList().toString();
+    }
+
+    /** The dev mirror pair shows one row in its lockstep recipe. The other direction is a mirror of that row. */
+    private static void checkMirrorRows(List<FluidInteractionRecipe> found) {
+        if (PackRun.ACTIVE) {
+            return;
+        }
+        BlockState result = JeiAutoTestInteractions.MIRROR_RESULT.defaultBlockState();
+        List<FluidInteractionRecipe> matches = found.stream()
+                .filter(recipe -> recipe.rowsOrSelf().stream().anyMatch(row -> result.equals(row.resultAtSource())))
+                .toList();
+        FluidInteractionRecipe recipe = matches.size() == 1 ? matches.getFirst() : null;
+        long rows = recipe == null ? 0 : recipe.rows().stream().filter(row -> result.equals(row.resultAtSource())).count();
+        long mirrors = recipe == null ? 0 : recipe.mirrors().stream().filter(row -> result.equals(row.resultAtSource())).count();
+        if (recipe == null || !recipe.isLockstep() || recipe.rows().size() != 2 || rows != 1 || mirrors != 1
+                || !JeiAutoTestInteractions.MIRROR_OWNER.equals(recipe.owner())) {
+            LOGGER.error("Smoke test expected one lockstep recipe of {} with 2 rows, 1 row and 1 mirror of {}, found {} recipe(s): {}",
+                    JeiAutoTestInteractions.MIRROR_OWNER, BuiltInRegistries.BLOCK.getKey(JeiAutoTestInteractions.MIRROR_RESULT), matches.size(),
+                    matches.stream().map(match -> match.id() + " (from " + match.owner() + ", " + match.rows().size() + " row(s), "
+                            + match.mirrors().size() + " mirror(s))").toList());
+            return;
+        }
+        LOGGER.info("Smoke test mirror rows {} (from {}): rows {}, mirrors {}", recipe.id(), recipe.owner(),
+                recipe.rows().stream().map(JeiAutoTest::describeRow).toList(), recipe.mirrors().stream().map(JeiAutoTest::describeRow).toList());
+    }
+
+    private static String describeRow(FluidInteractionRecipe row) {
+        return row.sources().stream().map(state -> Texts.form(state).getString()).toList() + " + "
+                + row.neighbors().stream().map(neighbor -> neighbor.describe().getString()).toList() + " -> " + describe(row.results());
     }
 
     /** The two-direction Gaia fixture frees the source slot and the neighbor slot. */
