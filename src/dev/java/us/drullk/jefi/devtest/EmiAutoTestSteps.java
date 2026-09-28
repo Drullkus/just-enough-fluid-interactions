@@ -2,9 +2,12 @@ package us.drullk.jefi.devtest;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -12,6 +15,7 @@ import org.slf4j.Logger;
 import us.drullk.jefi.jei.FluidInteractionCategory;
 import us.drullk.jefi.jei.FluidInteractionsJeiPlugin;
 import us.drullk.jefi.jei.ItemlessBlock;
+import us.drullk.jefi.jei.probe.EmiTagView;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.scene.SceneArrangement;
@@ -22,14 +26,20 @@ import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
 import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
+import dev.emi.emi.api.stack.ListEmiIngredient;
+import dev.emi.emi.api.stack.TagEmiIngredient;
 import dev.emi.emi.jemi.JemiRecipe;
 import dev.emi.emi.jemi.JemiStack;
 import dev.emi.emi.jemi.JemiUtil;
+import dev.emi.emi.registry.EmiTags;
+import dev.emi.emi.runtime.EmiTagKey;
 import dev.emi.emi.screen.RecipeScreen;
 import dev.emi.emi.screen.WidgetGroup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -91,7 +101,84 @@ final class EmiAutoTestSteps {
         }
         recipes = order(EmiApi.getRecipeManager().getRecipes(category));
         LOGGER.info("{} found {} recipe(s) in category {}", PREFIX, recipes.size(), category.getId());
+        checkTagList(mc);
+        checkTags();
         EmiApi.displayRecipeCategory(category);
+    }
+
+    /** The tags that EMI can show in place of entries, with their values, are the tags of {@link EmiTagView}. */
+    private static void checkTagList(Minecraft mc) {
+        EmiTagView view = EmiTagView.load(mc.getResourceManager());
+        List<String> counts = new ArrayList<>();
+        for (Registry<?> registry : List.of(BuiltInRegistries.ITEM, BuiltInRegistries.FLUID)) {
+            String difference = tagListDifference(registry, view, counts);
+            if (difference != null) {
+                LOGGER.error("{} tag list of {} differs from EMI's own: {}", PREFIX, registry.key().location(), difference);
+            }
+        }
+        LOGGER.info("{} tag list: {}", PREFIX, counts);
+    }
+
+    /** The value sets of at least two values on one side only, or null when both sides hold the same sets. */
+    private static <T> @Nullable String tagListDifference(Registry<T> registry, EmiTagView view, List<String> counts) {
+        Set<Set<T>> ours = registry.getTags()
+                .map(pair -> view.values(registry, pair.getSecond()))
+                .filter(values -> values.size() >= 2)
+                .map(Set::copyOf)
+                .collect(Collectors.toSet());
+        Set<Set<T>> emi = EmiTags.getTags(registry).stream()
+                .map(EmiTagKey::getList)
+                .filter(values -> values.size() >= 2)
+                .map(Set::copyOf)
+                .collect(Collectors.toSet());
+        counts.add(registry.key().location() + " " + ours.size() + " of " + emi.size() + " value set(s)");
+        Set<Set<T>> onlyOurs = new HashSet<>(ours);
+        onlyOurs.removeAll(emi);
+        Set<Set<T>> onlyEmi = new HashSet<>(emi);
+        onlyEmi.removeAll(ours);
+        if (onlyOurs.isEmpty() && onlyEmi.isEmpty()) {
+            return null;
+        }
+        return onlyOurs.size() + " set(s) only here, " + onlyEmi.size() + " only in EMI, for example "
+                + onlyOurs.stream().limit(3).map(set -> set.stream().map(value -> String.valueOf(registry.getKey(value))).sorted().toList()).toList()
+                + " and " + onlyEmi.stream().limit(3).map(set -> set.stream().map(value -> String.valueOf(registry.getKey(value))).sorted().toList()).toList();
+    }
+
+    /** No slot of a lockstep recipe is a tag in EMI. EMI draws a tag as one entry that never cycles. */
+    private static void checkTags() {
+        int lockstep = 0;
+        int tags = 0;
+        for (EmiRecipe recipe : recipes) {
+            if (!(recipe instanceof JemiRecipe<?> jemi) || !(jemi.recipe instanceof FluidInteractionRecipe found) || !found.isLockstep()) {
+                continue;
+            }
+            lockstep++;
+            List<String> shown = slotIngredients(jemi, found).stream().filter(EmiAutoTestSteps::holdsTag)
+                    .map(ingredient -> ingredient.getEmiStacks().size() + " stack(s) " + ingredient.getEmiStacks().stream()
+                            .map(stack -> stack.getName().getString()).toList())
+                    .toList();
+            if (!shown.isEmpty()) {
+                tags += shown.size();
+                LOGGER.error("{} tags: {} shows a tag in {}", PREFIX, recipe.getId(), shown);
+            }
+        }
+        LOGGER.info("{} tags: {} lockstep recipe(s), {} slot(s) that show a tag", PREFIX, lockstep, tags);
+    }
+
+    private static boolean holdsTag(EmiIngredient ingredient) {
+        return ingredient instanceof TagEmiIngredient
+                || ingredient instanceof ListEmiIngredient list && list.getIngredients().stream().anyMatch(TagEmiIngredient.class::isInstance);
+    }
+
+    /** The ingredient of every slot of a lockstep recipe. Each output slot holds one stack per row. */
+    private static List<EmiIngredient> slotIngredients(JemiRecipe<?> jemi, FluidInteractionRecipe recipe) {
+        List<EmiIngredient> ingredients = new ArrayList<>(jemi.inputs);
+        ingredients.addAll(jemi.catalysts);
+        int size = recipe.rows().size();
+        for (int i = 0; i + size <= jemi.outputs.size() && size > 0; i += size) {
+            ingredients.add(EmiIngredient.of(jemi.outputs.subList(i, i + size)));
+        }
+        return ingredients;
     }
 
     /** Screenshots the recipe on screen, then shows the next one. Returns false once it screenshots every recipe. */
@@ -163,12 +250,8 @@ final class EmiAutoTestSteps {
                 continue;
             }
             List<List<Placement>> slots = slotRows(lockstep);
-            List<EmiIngredient> ingredients = new ArrayList<>(jemi.inputs);
-            ingredients.addAll(jemi.catalysts);
+            List<EmiIngredient> ingredients = slotIngredients(jemi, lockstep);
             int size = lockstep.rows().size();
-            for (int i = 0; i + size <= jemi.outputs.size() && size > 0; i += size) {
-                ingredients.add(EmiIngredient.of(jemi.outputs.subList(i, i + size)));
-            }
             List<String> offenders = new ArrayList<>();
             for (EmiIngredient ingredient : ingredients) {
                 if (slots.stream().noneMatch(rows -> holds(ingredient, rows))) {

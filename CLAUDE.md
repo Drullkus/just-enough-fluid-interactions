@@ -89,6 +89,8 @@ Under `src/main/java/us/drullk/jefi/jei/`:
   - `getRecipeSlots()` is null under EMI. There only `handleInput` routes clicks.
 - JEI slots hold still fluids only (`FluidInteractionRecipe.stillForm`).
 - JEI cycles at most 100 entries of one slot on screen. Linked slots must hold equal counts.
+- EMI and TMRV show a slot whose entries hold a whole tag as one fixed tag entry. So under EMI a
+  lockstep group whose linked slot holds a tag stays apart (`EmiTagView`).
 - Which form a scene draws, still or flowing, is the user's decision. Confirm a change recipe by
   recipe first.
 - `SandboxLevel` reports `isClientSide == false`. The thread that uses a sandbox builds it:

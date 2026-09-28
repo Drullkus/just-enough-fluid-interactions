@@ -18,9 +18,8 @@ import org.slf4j.Logger;
 
 import com.mojang.logging.LogUtils;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
-import net.minecraft.core.HolderSet;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -43,7 +42,7 @@ import net.neoforged.fml.ModList;
  * <p>A row that shows an earlier row with the source and the neighbor swapped is a mirror. The recipe keeps the
  * mirror apart from its rows.
  *
- * <p>EMI shows a whole tag in place of its entries. So under EMI, a group that fills a tag stays apart.
+ * <p>When EMI is loaded, a group whose linked slot holds a tag stays apart ({@link EmiTagView}).
  */
 final class LockstepMerger {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -57,7 +56,7 @@ final class LockstepMerger {
         if (withinMods.isEmpty()) {
             return recipes;
         }
-        boolean emi = ModList.get().isLoaded("emi");
+        EmiTagView emiTags = ModList.get().isLoaded("emi") ? EmiTagView.load(Minecraft.getInstance().getResourceManager()) : null;
         List<List<FluidInteractionRecipe>> groups = new ArrayList<>();
         Map<Shape, List<FluidInteractionRecipe>> byShape = new HashMap<>();
         for (FluidInteractionRecipe recipe : recipes) {
@@ -89,7 +88,7 @@ final class LockstepMerger {
                     merged.addAll(group);
                     continue;
                 }
-                TagKey<?> tag = emi ? filledTag(group.getFirst(), rows.shown()) : null;
+                TagKey<?> tag = emiTags != null ? filledTag(emiTags, group.getFirst(), rows.shown()) : null;
                 if (tag != null) {
                     LOGGER.debug("Kept {} recipe(s) of {} from {} apart: EMI shows the tag {} in place of their entries",
                             group.size(), group.getFirst().owner(), group.getFirst().id(), tag.location());
@@ -346,8 +345,11 @@ final class LockstepMerger {
                         .distinct().toList();
     }
 
-    /** A tag of at least two values that one slot's entries fill, or null. */
-    private static @Nullable TagKey<?> filledTag(FluidInteractionRecipe first, List<FluidInteractionRecipe> rows) {
+    /**
+     * A tag of at least two values that EMI can show and whose every value one linked slot holds, or null. The
+     * tag can cover part of the slot. EMI then shows the tag and the other entries, so the entry count changes.
+     */
+    private static @Nullable TagKey<?> filledTag(EmiTagView emiTags, FluidInteractionRecipe first, List<FluidInteractionRecipe> rows) {
         List<Function<FluidInteractionRecipe, Object>> slots = new ArrayList<>();
         if (!FluidInteractionRecipe.sharesSources(rows)) {
             slots.add(row -> row.sourceFluids().getFirst());
@@ -364,7 +366,7 @@ final class LockstepMerger {
         for (Function<FluidInteractionRecipe, Object> slot : slots) {
             Set<Object> entries = new HashSet<>();
             rows.forEach(row -> entries.add(slot.apply(row)));
-            TagKey<?> tag = filledTag(entries);
+            TagKey<?> tag = filledTag(emiTags, entries);
             if (tag != null) {
                 return tag;
             }
@@ -373,37 +375,29 @@ final class LockstepMerger {
     }
 
     /** EMI reads a slot as a tag only when every entry is an item, or every entry is a fluid. */
-    private static @Nullable TagKey<?> filledTag(Set<Object> entries) {
+    private static @Nullable TagKey<?> filledTag(EmiTagView emiTags, Set<Object> entries) {
         if (entries.size() < 2) {
             return null;
         }
         if (entries.stream().allMatch(Item.class::isInstance)) {
-            return filledTag(BuiltInRegistries.ITEM, entries);
+            return filledTag(emiTags, BuiltInRegistries.ITEM, entries);
         }
         if (entries.stream().allMatch(Fluid.class::isInstance)) {
-            return filledTag(BuiltInRegistries.FLUID, entries);
+            return filledTag(emiTags, BuiltInRegistries.FLUID, entries);
         }
         return null;
     }
 
-    private static <T> @Nullable TagKey<T> filledTag(Registry<T> registry, Set<Object> entries) {
+    private static <T> @Nullable TagKey<T> filledTag(EmiTagView emiTags, Registry<T> registry, Set<Object> entries) {
         return registry.getTags()
-                .filter(pair -> fills(pair.getSecond(), entries))
+                .filter(pair -> fills(emiTags.values(registry, pair.getSecond()), entries))
                 .map(pair -> pair.getFirst())
                 .findFirst()
                 .orElse(null);
     }
 
-    private static <T> boolean fills(HolderSet.Named<T> tag, Set<Object> entries) {
-        if (tag.size() < 2) {
-            return false;
-        }
-        for (Holder<T> holder : tag) {
-            if (!entries.contains(holder.value())) {
-                return false;
-            }
-        }
-        return true;
+    private static <T> boolean fills(List<T> values, Set<Object> entries) {
+        return values.size() >= 2 && entries.containsAll(values);
     }
 
     /** What the recipes of one merge share. Fluids and blocks can differ. */
