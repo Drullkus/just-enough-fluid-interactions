@@ -19,12 +19,14 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.GsonHelper;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.material.Fluid;
 
 /** The tags that EMI 1.1.24 can show in place of a slot's entries. */
@@ -103,5 +105,36 @@ public final class EmiTagView {
         return holders.map(Holder::value)
                 .filter(value -> !registry.key().equals(Registries.FLUID) || value instanceof Fluid fluid && fluid.isSource(fluid.defaultFluidState()))
                 .toList();
+    }
+
+    /** The values of a tag that EMI can show in place of slot entries, in EMI's order. */
+    public record Match(List<?> values) {
+        /** True when the tag holds every entry of the slot. EMI then shows the tag, not the list. */
+        public boolean whole(int entryCount) {
+            return values.size() == entryCount;
+        }
+    }
+
+    /** A tag that holds two or more of these fluids or items, in EMI's order, or null. */
+    public @Nullable Match wholeOrPartialTag(Set<Object> entries) {
+        if (entries.size() < 2) {
+            return null;
+        }
+        if (entries.stream().allMatch(Item.class::isInstance)) {
+            return match(BuiltInRegistries.ITEM, entries);
+        }
+        if (entries.stream().allMatch(Fluid.class::isInstance)) {
+            return match(BuiltInRegistries.FLUID, entries);
+        }
+        return null;
+    }
+
+    private <T> @Nullable Match match(Registry<T> registry, Set<Object> entries) {
+        return registry.getTags()
+                .map(pair -> values(registry, pair.getSecond()))
+                .filter(values -> values.size() >= 2 && entries.containsAll(values))
+                .findFirst()
+                .map(Match::new)
+                .orElse(null);
     }
 }

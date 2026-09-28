@@ -1,6 +1,7 @@
 package us.drullk.jefi.jei;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import us.drullk.jefi.JustEnoughFluidInteractions;
+import us.drullk.jefi.jei.probe.EmiTagView;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
 import us.drullk.jefi.jei.probe.Placement;
 import us.drullk.jefi.jei.scene.SceneArrangement;
@@ -45,6 +47,7 @@ import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.AbstractRecipeCategory;
 import mezz.jei.api.runtime.IIngredientVisibility;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -89,8 +92,6 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private static final int AFTER_X = WIDTH - BEFORE_X - SCENE_SIZE;
 
     private final SceneCache scenes;
-    /** The slot view used to draw each recipe most recently. A static scene reads its alternatives from that view. */
-    private final Map<FluidInteractionRecipe, IRecipeSlotsView> drawnSlots = new IdentityHashMap<>();
     /** The orbit angles of the scenes a layout drew as drawables. A click on the category can only turn these angles. */
     private final Map<FluidInteractionRecipe, SceneRotation> staticRotations = new IdentityHashMap<>();
     /** The rows each lockstep recipe's slots hold. */
@@ -98,11 +99,16 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private final IJeiHelpers helpers;
     /** True when TMRV is loaded. A TMRV slot does not tell which entry it shows. */
     private final boolean tmrv = ModList.get().isLoaded("toomanyrecipeviewers");
+    /** Null when EMI is not loaded. Only EMI shows a tag in place of slot entries. */
+    private final @Nullable EmiTagView emiTags = ModList.get().isLoaded("emi") ? EmiTagView.load(Minecraft.getInstance().getResourceManager()) : null;
 
     public FluidInteractionCategory(IJeiHelpers helpers, SceneCache scenes) {
         super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), helpers.getGuiHelper().drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
         this.helpers = helpers;
         this.scenes = scenes;
+        if (tmrv) {
+            LOGGER.info("TMRV is loaded: the scene of a recipe with rows shows the row that EMI shows now");
+        }
     }
 
     @Override
@@ -317,11 +323,6 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         }
     }
 
-    @Override
-    public void draw(FluidInteractionRecipe recipe, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
-        drawnSlots.put(recipe, slots);
-    }
-
     /** The scene under the mouse, described for the alternatives the layout's slots show. */
     @Override
     public void getTooltip(ITooltipBuilder tooltip, FluidInteractionRecipe recipe, IRecipeSlotsView slots, double mouseX, double mouseY) {
@@ -390,7 +391,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     private void addScene(IRecipeExtrasBuilder builder, FluidInteractionRecipe recipe, boolean after, boolean drawable, SceneRotation rotation,
                           SlotLookup slots, int x) {
         if (drawable) {
-            SceneDrawable scene = new SceneDrawable(scenes, recipe, () -> staticVariant(recipe, after), rotation, SCENE_SIZE, SCENE_SIZE);
+            SceneDrawable scene = new SceneDrawable(scenes, recipe, () -> clockVariant(recipe, after), rotation, SCENE_SIZE, SCENE_SIZE);
             builder.addDrawable(scene).setPosition(x, SCENE_Y);
             return;
         }
@@ -400,25 +401,41 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         builder.addWidget(widget);
     }
 
-    private SceneVariant staticVariant(FluidInteractionRecipe recipe, boolean after) {
-        return recipe.isLockstep() ? clockVariant(recipe, after) : SceneView.variant(recipe, drawnSlots.get(recipe), after);
-    }
-
-    /** True when the scene must find its row from the time, because the slots do not tell. */
+    /** True when the scene must find its entries from the time, because the slots do not tell. */
     private boolean onEmiClock(FluidInteractionRecipe recipe) {
-        return recipe.isLockstep() && (tmrv || staticRotations.containsKey(recipe));
+        return tmrv || staticRotations.containsKey(recipe);
     }
 
-    /** EMI shows one entry of a slot per second, in list order. The scene shows the same row. */
+    /** EMI shows one entry of each slot per second, in list order. The scene shows the same entries. */
     private SceneVariant clockVariant(FluidInteractionRecipe recipe, boolean after) {
         long seconds = System.currentTimeMillis() / 1000L;
-        List<FluidInteractionRecipe> rows = shownRows.getOrDefault(recipe, recipe.rows());
-        FluidInteractionRecipe shown = rows.get((int) (seconds % rows.size()));
-        int row = Math.max(0, recipe.rows().indexOf(shown));
-        int source = (int) (seconds % shown.sourceFluids().size());
+        FluidInteractionRecipe shown = recipe;
+        int row = 0;
+        if (recipe.isLockstep()) {
+            List<FluidInteractionRecipe> rows = shownRows.getOrDefault(recipe, recipe.rows());
+            shown = rows.get((int) (seconds % rows.size()));
+            row = Math.max(0, recipe.rows().indexOf(shown));
+        }
+        int source = emiIndex(shown.sourceFluids(), emiTags, seconds);
         List<Object> entries = shown.neighborEntries();
-        int neighbor = entries.isEmpty() ? 0 : SceneArrangement.neighborIndexOfEntry(shown, entries.get((int) (seconds % entries.size())));
+        int neighbor = entries.isEmpty() ? 0 : SceneArrangement.neighborIndexOfEntry(shown, entries.get(emiIndex(entries, emiTags, seconds)));
         return new SceneVariant(source, neighbor, after, row);
+    }
+
+    /** The index of the entry EMI shows now. A slot that EMI shows as a tag keeps one entry. */
+    public static int emiIndex(List<?> entries, @Nullable EmiTagView emiTags, long seconds) {
+        if (entries.size() < 2) {
+            return 0;
+        }
+        EmiTagView.Match tag = emiTags == null ? null : emiTags.wholeOrPartialTag(new HashSet<>(entries));
+        if (tag == null) {
+            return (int) (seconds % entries.size());
+        }
+        if (!tag.whole(entries.size())) {
+            return 0;
+        }
+        int index = entries.indexOf(tag.values().getFirst());
+        return index < 0 ? 0 : index;
     }
 
     /**

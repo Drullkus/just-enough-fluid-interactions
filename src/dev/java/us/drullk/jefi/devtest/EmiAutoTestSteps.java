@@ -55,12 +55,15 @@ final class EmiAutoTestSteps {
     private static int shot;
     private static boolean lockstepShown;
     private static List<EmiRecipe> recipes = List.of();
+    private static @Nullable FluidInteractionRecipe clockRecipe;
+    private static long clockFirstSeconds;
+    private static int clockFirstIndex;
 
     /**
      * The test runs as a list of steps. It enters the world. It opens the category. It screenshots the category
-     * and the first recipes. It clicks the left scene of the recipe on screen. It screenshots the recipe turned.
-     * It shows the recipe with a block without an item and screenshots it. It shows a lockstep recipe and
-     * screenshots it. It stops the client.
+     * and the first recipes. It clicks the left scene of the recipe on screen. It reads twice, one second
+     * apart, which neighbor entry the scene of a recipe without rows shows. It screenshots the recipe turned. It shows the recipe with a block
+     * without an item and screenshots it. It shows a lockstep recipe and screenshots it. It stops the client.
      */
     private static final TickSteps STEPS = new TickSteps()
             .until(AutoTestWorld::atTitleScreen, mc -> AutoTestWorld.enterWorld(mc, WORLD_NAME, LOGGER, PREFIX))
@@ -76,6 +79,8 @@ final class EmiAutoTestSteps {
             .repeat(25, EmiAutoTestSteps::nextRecipe)
             .after(10, EmiAutoTestSteps::rotate)
             .after(20, mc -> grab(mc, "rotated"))
+            .after(1, EmiAutoTestSteps::checkClockEntryFirst)
+            .after(25, EmiAutoTestSteps::checkClockEntrySecond)
             .after(10, EmiAutoTestSteps::showBlockless)
             .after(20, mc -> grab(mc, "blockless"))
             .after(10, EmiAutoTestSteps::showLockstep)
@@ -215,6 +220,47 @@ final class EmiAutoTestSteps {
         } else {
             LOGGER.error("{} clicked the left scene at {}, {} and nothing took the click", PREFIX, x, y);
         }
+    }
+
+    /** A recipe without rows whose neighbor slot holds two or more entries. */
+    private static @Nullable FluidInteractionRecipe recipeWithFreeSlot() {
+        for (EmiRecipe recipe : recipes) {
+            if (recipe instanceof JemiRecipe<?> jemi && jemi.recipe instanceof FluidInteractionRecipe found
+                    && !found.isLockstep() && found.neighborEntries().size() >= 2) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** Reads which neighbor entry the scene shows now. */
+    private static void checkClockEntryFirst(Minecraft mc) {
+        clockRecipe = recipeWithFreeSlot();
+        if (clockRecipe == null) {
+            LOGGER.error("{} found no non-lockstep recipe with a cycling free slot", PREFIX);
+            return;
+        }
+        clockFirstSeconds = System.currentTimeMillis() / 1000L;
+        clockFirstIndex = FluidInteractionCategory.emiIndex(clockRecipe.neighborEntries(), EmiTagView.load(mc.getResourceManager()), clockFirstSeconds);
+    }
+
+    /** One second later, reads the entry again. It must equal the entry EMI shows. */
+    private static void checkClockEntrySecond(Minecraft mc) {
+        if (clockRecipe == null) {
+            return;
+        }
+        List<Object> entries = clockRecipe.neighborEntries();
+        long seconds = System.currentTimeMillis() / 1000L;
+        int index = FluidInteractionCategory.emiIndex(entries, EmiTagView.load(mc.getResourceManager()), seconds);
+        int expectedFirst = (int) (clockFirstSeconds % entries.size());
+        int expectedNow = (int) (seconds % entries.size());
+        if (seconds - clockFirstSeconds < 1 || clockFirstIndex != expectedFirst || index != expectedNow) {
+            LOGGER.error("{} scene entry {}: EMI shows entry {} of {} at {}s and {} at {}s, the scene shows {} and {}", PREFIX,
+                    clockRecipe.id(), expectedFirst, entries.size(), clockFirstSeconds, expectedNow, seconds, clockFirstIndex, index);
+            return;
+        }
+        LOGGER.info("{} scene entry {}: entry {} of {} at {}s, entry {} one second later", PREFIX, clockRecipe.id(),
+                expectedFirst, entries.size(), clockFirstSeconds, expectedNow);
     }
 
     /** JEMI wraps the {@link ItemlessBlock} in a stack that finds its recipe. */
