@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -52,6 +53,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.FluidType;
 
@@ -94,6 +96,8 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
     /** The rows each lockstep recipe's slots hold. */
     private final Map<FluidInteractionRecipe, List<FluidInteractionRecipe>> shownRows = new IdentityHashMap<>();
     private final IJeiHelpers helpers;
+    /** True when TMRV is loaded. A TMRV slot does not tell which entry it shows. */
+    private final boolean tmrv = ModList.get().isLoaded("toomanyrecipeviewers");
 
     public FluidInteractionCategory(IJeiHelpers helpers, SceneCache scenes) {
         super(FluidInteractionsJeiPlugin.TYPE, Texts.title(), helpers.getGuiHelper().drawableBuilder(ICON, 0, 0, ICON_SIZE, ICON_SIZE).setTextureSize(ICON_SIZE, ICON_SIZE).build(), WIDTH, HEIGHT);
@@ -325,8 +329,7 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
         if (after == null) {
             return;
         }
-        boolean clock = recipe.isLockstep() && staticRotations.containsKey(recipe);
-        SceneView.tooltip(tooltip, recipe, clock ? staticVariant(recipe, after) : SceneView.variant(recipe, slots, after));
+        SceneView.tooltip(tooltip, recipe, onEmiClock(recipe) ? clockVariant(recipe, after) : SceneView.variant(recipe, slots, after));
         if (staticRotations.containsKey(recipe)) {
             tooltip.add(Texts.clickToRotate().withStyle(ChatFormatting.DARK_GRAY));
         }
@@ -391,16 +394,23 @@ public final class FluidInteractionCategory extends AbstractRecipeCategory<Fluid
             builder.addDrawable(scene).setPosition(x, SCENE_Y);
             return;
         }
-        SceneWidget widget = new SceneWidget(scenes, recipe, after, rotation, slots, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
+        Supplier<SceneVariant> variant = onEmiClock(recipe) ? () -> clockVariant(recipe, after) : () -> SceneView.variant(recipe, slots, after);
+        SceneWidget widget = new SceneWidget(scenes, recipe, rotation, variant, x, SCENE_Y, SCENE_SIZE, SCENE_SIZE);
         builder.addInputHandler(widget);
         builder.addWidget(widget);
     }
 
-    /** EMI shows entry {@code seconds % size} of a cycling slot, so a static scene shows that row. */
     private SceneVariant staticVariant(FluidInteractionRecipe recipe, boolean after) {
-        if (!recipe.isLockstep()) {
-            return SceneView.variant(recipe, drawnSlots.get(recipe), after);
-        }
+        return recipe.isLockstep() ? clockVariant(recipe, after) : SceneView.variant(recipe, drawnSlots.get(recipe), after);
+    }
+
+    /** True when the scene must find its row from the time, because the slots do not tell. */
+    private boolean onEmiClock(FluidInteractionRecipe recipe) {
+        return recipe.isLockstep() && (tmrv || staticRotations.containsKey(recipe));
+    }
+
+    /** EMI shows one entry of a slot per second, in list order. The scene shows the same row. */
+    private SceneVariant clockVariant(FluidInteractionRecipe recipe, boolean after) {
         long seconds = System.currentTimeMillis() / 1000L;
         List<FluidInteractionRecipe> rows = shownRows.getOrDefault(recipe, recipe.rows());
         FluidInteractionRecipe shown = rows.get((int) (seconds % rows.size()));

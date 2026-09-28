@@ -85,12 +85,16 @@ Under `src/main/java/us/drullk/jefi/jei/`:
 - EMI's JEMI bridge and TMRV run the category with builders of their own.
   - Use only API of the minimum JEI that every viewer implements: `addRecipePlusSign()`,
     `addRecipeArrow()`, the two-argument `setPosition`.
-  - Never use `mezz.jei.common.Internal`. Never set a fluid renderer: TMRV throws.
+  - Never use `mezz.jei.common.Internal`. Never set a fluid renderer: TMRV throws for one on a
+    slot that holds a block.
   - `getRecipeSlots()` is null under EMI. There only `handleInput` routes clicks.
 - JEI slots hold still fluids only (`FluidInteractionRecipe.stillForm`).
 - JEI cycles at most 100 entries of one slot on screen. Linked slots must hold equal counts.
 - EMI and TMRV show a slot whose entries hold a whole tag as one fixed tag entry. So under EMI a
-  lockstep group whose linked slot holds a tag stays apart (`EmiTagView`).
+  lockstep group whose linked slot holds a tag stays apart (`EmiTagView`). A custom slot renderer
+  does not stop that swap. Only JEI passes a focus to `setRecipe`.
+- EMI shows a slot's entries one per second, in list order. A TMRV slot does not tell which
+  entry it shows, so the scene of a recipe with rows finds its row from the time.
 - Which form a scene draws, still or flowing, is the user's decision. Confirm a change recipe by
   recipe first.
 - `SandboxLevel` reports `isClientSide == false`. The thread that uses a sandbox builds it:

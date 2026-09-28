@@ -1,5 +1,6 @@
 package us.drullk.jefi.jei.scene;
 
+import java.util.function.Supplier;
 
 import us.drullk.jefi.jei.Texts;
 import us.drullk.jefi.jei.probe.FluidInteractionRecipe;
@@ -17,28 +18,23 @@ import net.minecraft.client.gui.navigation.ScreenRectangle;
 /**
  * A JEI recipe widget showing one recipe's arrangement before or after the interaction as a 3D scene.
  *
- * <p>The scene follows whatever alternatives the input slots are currently cycling through. A drag with the
- * left mouse button can orbit it. A click that never became a drag steps the yaw instead. This is the only
- * rotation a layout can give when it routes clicks and not drags.
+ * <p>The scene shows the fluids and blocks that the slots show now. A drag with the left mouse button turns
+ * the scene. A click without a drag turns it by one step, for a viewer that sends clicks and not drags.
  */
 public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     private final SceneView view;
-    private final FluidInteractionRecipe recipe;
-    private final boolean after;
     private final SceneRotation rotation;
-    private final SlotLookup slots;
+    private final Supplier<SceneVariant> variant;
     private final ScreenPosition position;
     private final ScreenRectangle area;
     private final int width;
     private final int height;
 
-    public SceneWidget(SceneCache cache, FluidInteractionRecipe recipe, boolean after, SceneRotation rotation,
-                       SlotLookup slots, int x, int y, int width, int height) {
+    public SceneWidget(SceneCache cache, FluidInteractionRecipe recipe, SceneRotation rotation,
+                       Supplier<SceneVariant> variant, int x, int y, int width, int height) {
         this.view = new SceneView(cache, recipe);
-        this.recipe = recipe;
-        this.after = after;
         this.rotation = rotation;
-        this.slots = slots;
+        this.variant = variant;
         this.position = new ScreenPosition(x, y);
         this.area = new ScreenRectangle(x, y, width, height);
         this.width = width;
@@ -59,7 +55,7 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
     public void drawWidget(GuiGraphics graphics, double mouseX, double mouseY) {
         rotation.settle();
         SceneCursor.request(this, contains(mouseX, mouseY) || rotation.dragging());
-        view.draw(graphics, variant(), width, height, rotation.yaw(), rotation.pitch(), rotation.version(), !rotation.dragging());
+        view.draw(graphics, variant.get(), width, height, rotation.yaw(), rotation.pitch(), rotation.version(), !rotation.dragging());
     }
 
     /**
@@ -109,9 +105,5 @@ public final class SceneWidget implements IRecipeWidget, IJeiInputHandler {
 
     private boolean contains(double mouseX, double mouseY) {
         return mouseX >= 0 && mouseY >= 0 && mouseX < width && mouseY < height;
-    }
-
-    private SceneVariant variant() {
-        return SceneView.variant(recipe, slots, after);
     }
 }
